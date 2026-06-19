@@ -271,13 +271,17 @@ image = VAE.decode(z)
 | 输出文件 | 函数 | 解释 |
 | --- | --- | --- |
 | `outputs/generation_steps.png` | `save_generation_steps` | 展示每个数字在采样 16 步中的生成轨迹 |
-| `outputs/flow_feature_maps.png` | `save_flow_feature_maps` | 展示单个 posterior 样本经过 8 个 Flow 主干块后的真实中间层特征图 |
+| `outputs/flow_feature_pca_map.png` | `save_flow_feature_pca_map` | 把单个 posterior 样本的 Flow 末端特征图用 PCA 压到 3 通道 RGB |
 | `outputs/flow_feature_pca.png` | `save_flow_feature_pca` | 把 posterior 样本对应的 Flow 最后一层中间特征压到 2D，观察不同数字是否分离 |
+| `outputs/vae_reconstruction.png` | `save_vae_reconstruction` | 选一张 MNIST，展示原图、VAE 压缩表示、重构图和误差图 |
 | `outputs/vae_latent_pca.png` | `save_vae_latent_pca` | 把 VAE 潜变量均值压到 2D，观察 VAE 是否形成可分结构 |
+| `outputs/vae_latent_distribution.png` | `save_vae_latent_distribution` | 展示 VAE 潜变量均值、posterior 样本和 posterior 标准差分布 |
 
 PCA 使用 `torch.pca_lowrank`。散点颜色对应 MNIST 标签。
 
-中间层特征图可视化会从测试集取一个样本，在 `visual.feature_map_time` 指定的时间点提取每个 Flow 主干块的输出。图中每一行表示一个主干块，每一列表示一个通道，默认展示前 8 个通道。
+Flow 特征图可视化会从测试集取一个样本，在 `visual.feature_map_time` 指定的时间点提取 Flow 末端特征，用 PCA 压成 3 通道图像。这样比直接画任意几个卷积通道更容易观察整体结构。
+
+VAE 重构可视化会从 MNIST 测试集中取一张图，展示 `原图 -> 32x14x14 潜变量 PCA 图 -> 重构图 -> 绝对误差图`，用于观察压缩和重构能力。
 
 ## 目录结构
 
@@ -318,7 +322,7 @@ logs/                日志目录，运行后生成，默认被 git 忽略
 | `model.time_frequencies` | `16` | 时间嵌入频率数 |
 | `model.condition_dim` | `128` | AdaLN 条件向量维度 |
 | `sample.sampling_steps` | `16` | 训练和采样使用的离散时间步 |
-| `visual.feature_map_channels` | `8` | 每个 Flow 主干块展示的特征图通道数 |
+| `visual.feature_map_channels` | `3` | Flow 末端特征图 PCA 保留通道数，最终取 3 通道组成 RGB 图 |
 | `visual.feature_map_time` | `0.5` | 特征图可视化采用的生成时间点 |
 
 调试配置示例 `config/debug.yaml`：
@@ -421,9 +425,11 @@ ckpt/flow.pt
 
 ```text
 outputs/generation_steps.png
-outputs/flow_feature_maps.png
+outputs/flow_feature_pca_map.png
 outputs/flow_feature_pca.png
+outputs/vae_reconstruction.png
 outputs/vae_latent_pca.png
+outputs/vae_latent_distribution.png
 ```
 
 如果缺少 checkpoint，命令会提示先运行：

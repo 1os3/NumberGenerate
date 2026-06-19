@@ -19,10 +19,12 @@ from data import get_mnist_loaders
 from model import FlowModel, VAE
 from train.common import load_checkpoint, prepare_runtime
 from vis.plots import (
-    save_flow_feature_maps,
+    save_flow_feature_pca_map,
     save_flow_feature_pca,
     save_generation_steps,
+    save_vae_latent_distribution,
     save_vae_latent_pca,
+    save_vae_reconstruction,
 )
 from vis.visualize_checks import check_visualization_checkpoints
 
@@ -47,9 +49,11 @@ def run_visualization(cfg: AppConfig) -> dict[str, Path]:
     _, test_loader = get_mnist_loaders(cfg)
     return {
         "generation_steps": save_generation_steps(flow, vae, cfg),
-        "flow_feature_maps": save_flow_feature_maps(flow, vae, test_loader, cfg),
+        "flow_feature_pca_map": save_flow_feature_pca_map(flow, vae, test_loader, cfg),
         "flow_feature_pca": save_flow_feature_pca(flow, vae, test_loader, cfg),
+        "vae_reconstruction": save_vae_reconstruction(vae, test_loader, cfg),
         "vae_latent_pca": save_vae_latent_pca(vae, test_loader, cfg),
+        "vae_latent_distribution": save_vae_latent_distribution(vae, test_loader, cfg),
     }
 
 

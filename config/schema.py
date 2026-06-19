@@ -326,3 +326,5 @@ def _check_config_relations(cfg: AppConfig) -> None:
         raise ValueError("sample.history_steps 不得大于 sample.sampling_steps。")
     if cfg.visual.feature_map_channels > cfg.model.flow_hidden_channels:
         raise ValueError("visual.feature_map_channels 不得大于 model.flow_hidden_channels。")
+    if cfg.visual.feature_map_channels < 3:
+        raise ValueError("visual.feature_map_channels 必须 >= 3，才能组成 RGB PCA 特征图。")

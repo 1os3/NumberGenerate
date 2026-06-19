@@ -1,13 +1,15 @@
-"""保存生成结果、Flow 特征图、Flow 特征 PCA 和 VAE 潜空间 PCA 可视化。
+"""保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量分布可视化。
 
 模块: vis/plots.py
 依赖: pathlib, torch, matplotlib, config.schema, model, train.flow_trainer, train.sampling, vis.plots_checks
 读取配置: paths.output_dir, model.num_classes, sample.history_steps, sample.sampling_steps, visual.pca_samples, visual.feature_map_channels, visual.feature_map_time
 对外接口:
     - save_generation_steps(flow, vae, cfg) -> Path
-    - save_flow_feature_maps(flow, vae, loader, cfg) -> Path
+    - save_flow_feature_pca_map(flow, vae, loader, cfg) -> Path
     - save_flow_feature_pca(flow, vae, loader, cfg) -> Path
+    - save_vae_reconstruction(vae, loader, cfg) -> Path
     - save_vae_latent_pca(vae, loader, cfg) -> Path
+    - save_vae_latent_distribution(vae, loader, cfg) -> Path
 说明: 绘图库在函数内按需导入，便于缺依赖时给出明确错误。
 """
 
@@ -38,8 +40,8 @@ def save_generation_steps(flow: FlowModel, vae: VAE, cfg: AppConfig) -> Path:
 
 
 @torch.no_grad()
-def save_flow_feature_maps(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) -> Path:
-    """保存单个样本在 Flow 各主干块后的真实中间层特征图。"""
+def save_flow_feature_pca_map(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) -> Path:
+    """保存单个样本在 Flow 末端特征上的三通道 PCA 图。"""
 
     check_visual_config(cfg)
     cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
@@ -50,11 +52,11 @@ def save_flow_feature_maps(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) ->
     z = sample_vae_posterior(vae, image)
     t = torch.full((1,), cfg.visual.feature_map_time, device=device)
     features = flow.extract_features(z, t, label)
-    feature_maps = [
-        feature[0, : cfg.visual.feature_map_channels].detach().cpu() for feature in features
-    ]
-    path = cfg.paths.output_dir / "flow_feature_maps.png"
-    _save_feature_map_grid(feature_maps, label.item(), cfg.visual.feature_map_time, path)
+    rgb_map = _feature_map_pca_rgb(
+        features[-1][0].detach().cpu(), cfg.visual.feature_map_channels
+    )
+    path = cfg.paths.output_dir / "flow_feature_pca_map.png"
+    _save_rgb_map(rgb_map, path, f"Flow final feature PCA | label={label.item()} | t={cfg.visual.feature_map_time:.2f}")
     return path
 
 
@@ -89,6 +91,47 @@ def save_vae_latent_pca(vae: VAE, loader, cfg: AppConfig) -> Path:
     points = _pca_2d(mu.flatten(1).detach().cpu())
     path = cfg.paths.output_dir / "vae_latent_pca.png"
     _save_scatter(points, labels, path, "VAE latent PCA")
+    return path
+
+
+@torch.no_grad()
+def save_vae_reconstruction(vae: VAE, loader, cfg: AppConfig) -> Path:
+    """保存单张 MNIST 图像的 VAE 压缩、重构和误差图。"""
+
+    check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    device = next(vae.parameters()).device
+    images, labels = _first_batch(loader)
+    image = images[:1].to(device)
+    label = int(labels[0].item())
+    mu, _ = vae.encode(image)
+    reconstruction = vae.decode(mu).detach().cpu()
+    latent_rgb = _feature_map_pca_rgb(mu[0].detach().cpu(), 3)
+    path = cfg.paths.output_dir / "vae_reconstruction.png"
+    _save_vae_reconstruction(
+        image.cpu(), latent_rgb, reconstruction, label, path
+    )
+    return path
+
+
+@torch.no_grad()
+def save_vae_latent_distribution(vae: VAE, loader, cfg: AppConfig) -> Path:
+    """保存 VAE 潜变量均值、posterior 样本和标准差的分布图。"""
+
+    check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    device = next(vae.parameters()).device
+    images, _ = _collect_images(loader, cfg)
+    mu, logvar = vae.encode(images.to(device))
+    posterior = vae.reparameterize(mu, logvar)
+    std = torch.exp(0.5 * logvar)
+    path = cfg.paths.output_dir / "vae_latent_distribution.png"
+    _save_vae_distribution(
+        mu.detach().cpu().flatten(),
+        posterior.detach().cpu().flatten(),
+        std.detach().cpu().flatten(),
+        path,
+    )
     return path
 
 
@@ -143,44 +186,77 @@ def _save_step_grid(history: torch.Tensor, path: Path) -> None:
     plt.close(fig)
 
 
-def _save_feature_map_grid(
-    feature_maps: list[torch.Tensor], label: int, time_value: float, path: Path
-) -> None:
+def _feature_map_pca_rgb(feature_map: torch.Tensor, components: int) -> torch.Tensor:
+    channels, height, width = feature_map.shape
+    flat = feature_map.reshape(channels, -1).T
+    centered = flat - flat.mean(dim=0, keepdim=True)
+    q = min(components, centered.shape[0], centered.shape[1])
+    _, _, v = torch.pca_lowrank(centered, q=q)
+    projected = centered @ v[:, :q]
+    rgb = projected[:, -3:].T.reshape(3, height, width)
+    return torch.stack([_normalize_map(channel) for channel in rgb])
+
+
+def _save_rgb_map(rgb_map: torch.Tensor, path: Path, title: str) -> None:
     plt = _matplotlib()
-    rows = len(feature_maps)
-    cols = feature_maps[0].shape[0]
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 1.2, rows * 1.2))
-    axes_grid = _axes_grid(axes, rows, cols)
-    for row, maps in enumerate(feature_maps):
-        for col, feature_map in enumerate(maps):
-            axis = axes_grid[row][col]
-            axis.imshow(_normalize_map(feature_map).numpy(), cmap="viridis")
-            axis.set_xticks([])
-            axis.set_yticks([])
-            if row == 0:
-                axis.set_title(f"C{col}", fontsize=7)
-            if col == 0:
-                axis.set_ylabel(f"B{row + 1}", fontsize=8)
-    fig.suptitle(f"Flow feature maps | label={label} | t={time_value:.2f}", fontsize=10)
+    fig, axis = plt.subplots(figsize=(4, 4))
+    axis.imshow(rgb_map.permute(1, 2, 0).numpy())
+    axis.set_title(title)
+    axis.axis("off")
     fig.tight_layout(pad=0.1)
     fig.savefig(path, dpi=180)
     plt.close(fig)
-
-
-def _axes_grid(axes, rows: int, cols: int):
-    if rows == 1 and cols == 1:
-        return [[axes]]
-    if rows == 1:
-        return [axes]
-    if cols == 1:
-        return [[axis] for axis in axes]
-    return axes
 
 
 def _normalize_map(feature_map: torch.Tensor) -> torch.Tensor:
     min_value = feature_map.min()
     max_value = feature_map.max()
     return (feature_map - min_value) / (max_value - min_value + 1e-6)
+
+
+def _save_vae_reconstruction(
+    image: torch.Tensor,
+    latent_rgb: torch.Tensor,
+    reconstruction: torch.Tensor,
+    label: int,
+    path: Path,
+) -> None:
+    plt = _matplotlib()
+    error = (image - reconstruction).abs()
+    fig, axes = plt.subplots(1, 4, figsize=(8, 2.4))
+    panels = [
+        (image[0, 0], "MNIST input", "gray"),
+        (latent_rgb.permute(1, 2, 0), "Latent PCA 32x14x14", None),
+        (reconstruction[0, 0], "VAE reconstruction", "gray"),
+        (error[0, 0], "Absolute error", "magma"),
+    ]
+    for axis, (panel, title, cmap) in zip(axes, panels):
+        axis.imshow(panel.numpy(), cmap=cmap, vmin=0 if cmap == "gray" else None, vmax=1 if cmap == "gray" else None)
+        axis.set_title(title, fontsize=8)
+        axis.axis("off")
+    fig.suptitle(f"VAE compression and reconstruction | label={label}", fontsize=10)
+    fig.tight_layout(pad=0.2)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def _save_vae_distribution(
+    mu: torch.Tensor, posterior: torch.Tensor, std: torch.Tensor, path: Path
+) -> None:
+    plt = _matplotlib()
+    xs = torch.linspace(-4, 4, 200)
+    normal = torch.exp(-0.5 * xs.pow(2)) / (2 * torch.pi) ** 0.5
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3))
+    axes[0].hist(mu.numpy(), bins=80, density=True, alpha=0.55, label="mu")
+    axes[0].hist(posterior.numpy(), bins=80, density=True, alpha=0.45, label="posterior sample")
+    axes[0].plot(xs.numpy(), normal.numpy(), color="black", linewidth=1, label="N(0,1)")
+    axes[0].set_title("Latent value distribution")
+    axes[0].legend(fontsize=7)
+    axes[1].hist(std.numpy(), bins=80, density=True, alpha=0.7, color="tab:green")
+    axes[1].set_title("Posterior std distribution")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
 
 
 def _save_scatter(points: torch.Tensor, labels: torch.Tensor, path: Path, title: str) -> None:

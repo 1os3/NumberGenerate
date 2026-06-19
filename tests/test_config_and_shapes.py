@@ -137,7 +137,7 @@ def _build_test_config():
         "visual": {
             "pca_samples": 4,
             "grid_columns": 2,
-            "feature_map_channels": 2,
+            "feature_map_channels": 3,
             "feature_map_time": 0.5,
         },
     }
