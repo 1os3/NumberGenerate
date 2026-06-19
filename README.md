@@ -368,9 +368,9 @@ python -m venv .venv
 3. 创建并激活虚拟环境，或使用已有 Python 环境。
 4. 执行 `pip install -r requirements.txt`。
 5. 运行 `python -m unittest discover -s tests` 确认环境可用。
-6. 运行 `python -m train.vae_trainer` 生成 `ckpt/vae.pt`。
-7. 运行 `python -m train.flow_trainer` 生成 `ckpt/flow.pt`。
-8. 调用可视化 API，检查 `outputs/` 下的生成图和 PCA 图。
+6. 运行 `python -m train.vae_trainer` 生成并持续更新 `ckpt/vae.pt`。
+7. 运行 `python -m train.flow_trainer` 生成并持续更新 `ckpt/flow.pt`。
+8. 运行 `python -m vis.visualize` 检查完整生成图和 PCA 图；只检查 VAE 时运行 `python -m vis.visualize --mode vae`。
 
 项目所有运行产物默认都写入项目目录内。`datasets/`、`ckpt/`、`outputs/`、`logs/` 已被 `.gitignore` 忽略。
 
@@ -382,7 +382,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m train.vae_trainer
 ```
 
-训练完成后生成：
+每个 epoch 结束后都会覆盖保存：
 
 ```text
 ckpt/vae.pt
@@ -394,7 +394,7 @@ ckpt/vae.pt
 .\.venv\Scripts\python.exe -m train.flow_trainer
 ```
 
-训练完成后生成：
+每个 epoch 结束后都会覆盖保存：
 
 ```text
 ckpt/flow.pt
@@ -407,18 +407,28 @@ ckpt/flow.pt
 .\.venv\Scripts\python.exe -m train.flow_trainer --config config/debug.yaml
 ```
 
+两个训练入口都会在启动时自动查找对应的最新 checkpoint。若 `ckpt/vae.pt` 或 `ckpt/flow.pt` 已存在，程序会恢复模型参数、优化器状态和 `epoch/step/loss` 指标，并从下一轮 epoch 继续训练。checkpoint 使用单文件覆盖策略，因此默认只保留最新训练状态；如果想从头训练，删除或重命名对应的 checkpoint 文件即可。
+
 ## 生成与可视化命令
 
-先确保 `ckpt/vae.pt` 和 `ckpt/flow.pt` 已存在。
+完整可视化需要 `ckpt/vae.pt` 和 `ckpt/flow.pt` 都已存在。
 
 ```powershell
 .\.venv\Scripts\python.exe -m vis.visualize
+```
+
+仅可视化 VAE 时只需要 `ckpt/vae.pt`：
+
+```powershell
+.\.venv\Scripts\python.exe -m vis.visualize --mode vae
+.\.venv\Scripts\python.exe -m vis.visualize --only-vae
 ```
 
 使用调试配置或自定义配置：
 
 ```powershell
 .\.venv\Scripts\python.exe -m vis.visualize --config config/debug.yaml
+.\.venv\Scripts\python.exe -m vis.visualize --config config/debug.yaml --mode vae
 ```
 
 默认输出：
@@ -427,6 +437,14 @@ ckpt/flow.pt
 outputs/generation_steps.png
 outputs/flow_feature_pca_map.png
 outputs/flow_feature_pca.png
+outputs/vae_reconstruction.png
+outputs/vae_latent_pca.png
+outputs/vae_latent_distribution.png
+```
+
+VAE-only 模式只输出：
+
+```text
 outputs/vae_reconstruction.png
 outputs/vae_latent_pca.png
 outputs/vae_latent_distribution.png

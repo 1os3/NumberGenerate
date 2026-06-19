@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from config import load_config
 from config.schema import build_config
 from model import ConditionalDepthwiseSeparableBlock, FlowModel, LayerNorm2d, VAE
 from train import flow_matching_loss, sample_flow, sample_vae_posterior, vae_loss
+from train.common import load_latest_training_state, save_checkpoint
+from vis.visualize_checks import check_visualization_checkpoints
 
 
 class ConfigAndShapeTests(unittest.TestCase):
@@ -85,6 +88,68 @@ class ConfigAndShapeTests(unittest.TestCase):
         labels = torch.tensor([0, 1], dtype=torch.long)
         images = sample_flow(flow, vae, labels, self.cfg)
         self.assertEqual(tuple(images.shape), (2, 1, 28, 28))
+
+    def test_training_checkpoint_resume_restores_state(self) -> None:
+        """断点续训应恢复模型参数、优化器状态和最新指标。"""
+
+        path = self.cfg.project_root / "outputs" / "unit_test_resume.pt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+        loss = model(torch.ones(1, 2)).sum()
+        loss.backward()
+        optimizer.step()
+        metrics = {"epoch": 2, "step": 7, "loss": 0.5}
+        try:
+            save_checkpoint(
+                path,
+                {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "metrics": metrics,
+                },
+            )
+            restored_model = torch.nn.Linear(2, 1)
+            restored_optimizer = torch.optim.AdamW(restored_model.parameters(), lr=0.01)
+            restored_metrics = load_latest_training_state(
+                path,
+                restored_model,
+                restored_optimizer,
+                torch.device("cpu"),
+                "Unit",
+            )
+            self.assertEqual(restored_metrics, metrics)
+            for expected, actual in zip(model.parameters(), restored_model.parameters()):
+                self.assertTrue(torch.allclose(expected, actual))
+            self.assertTrue(restored_optimizer.state_dict()["state"])
+        finally:
+            if path.exists():
+                path.unlink()
+
+    def test_visualization_vae_mode_does_not_require_flow_checkpoint(self) -> None:
+        """VAE-only 可视化只应检查 VAE 权重，不应要求 Flow 权重。"""
+
+        vae_path = self.cfg.project_root / "outputs" / "unit_test_vae_only.pt"
+        flow_path = self.cfg.project_root / "outputs" / "unit_test_missing_flow.pt"
+        vae_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            vae_path.touch()
+            if flow_path.exists():
+                flow_path.unlink()
+            cfg = replace(
+                self.cfg,
+                paths=replace(
+                    self.cfg.paths,
+                    vae_checkpoint=vae_path,
+                    flow_checkpoint=flow_path,
+                ),
+            )
+            check_visualization_checkpoints(cfg, "vae")
+            with self.assertRaises(FileNotFoundError):
+                check_visualization_checkpoints(cfg, "all")
+        finally:
+            if vae_path.exists():
+                vae_path.unlink()
 
 
 def _build_test_config():

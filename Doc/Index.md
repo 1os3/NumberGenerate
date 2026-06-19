@@ -28,7 +28,7 @@
 
 ## train/ — 训练 / 评估循环
 
-- [train/common.py](../train/common.py) — 提供训练脚本共用的随机种子、设备和 checkpoint 工具
+- [train/common.py](../train/common.py) — 提供训练脚本共用的随机种子、设备、checkpoint 保存和断点续训工具
 - [train/vae_trainer.py](../train/vae_trainer.py) — 训练无条件 MNIST VAE
 - [train/flow_trainer.py](../train/flow_trainer.py) — 训练数字条件潜空间 Flow Matching 模型
 - [train/sampling.py](../train/sampling.py) — 提供 Flow Matching 生成采样函数
@@ -36,7 +36,7 @@
 ## vis/ — 可视化与日志渲染
 
 - [vis/plots.py](../vis/plots.py) — 保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量分布可视化
-- [vis/visualize.py](../vis/visualize.py) — 一键加载训练权重并生成全部可视化图
+- [vis/visualize.py](../vis/visualize.py) — 一键加载训练权重并按模式生成完整或仅 VAE 可视化图
 
 ## tests/ — 自动化验证
 

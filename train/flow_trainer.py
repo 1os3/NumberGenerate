@@ -20,7 +20,12 @@ import torch.nn.functional as F
 from config import AppConfig, load_config
 from data import get_mnist_loaders
 from model import FlowModel, VAE
-from train.common import load_checkpoint, prepare_runtime, save_checkpoint
+from train.common import (
+    load_checkpoint,
+    load_latest_training_state,
+    prepare_runtime,
+    save_checkpoint,
+)
 from train.flow_trainer_checks import check_flow_batch, check_flow_training_config
 
 
@@ -41,17 +46,29 @@ def train_flow(cfg: AppConfig) -> dict:
     optimizer = torch.optim.AdamW(
         flow.parameters(), lr=cfg.train.flow_lr, weight_decay=cfg.train.weight_decay
     )
-    metrics = {"epoch": 0, "step": 0, "loss": float("nan")}
-    for epoch in range(1, cfg.train.flow_epochs + 1):
+    metrics = load_latest_training_state(
+        cfg.paths.flow_checkpoint, flow, optimizer, device, "Flow"
+    )
+    if cfg.train.max_train_steps is not None and metrics["step"] >= cfg.train.max_train_steps:
+        print("Flow 已达到 train.max_train_steps，无需继续训练。")
+        return metrics
+    if metrics["epoch"] >= cfg.train.flow_epochs:
+        print("Flow checkpoint 已达到配置的目标 epoch，无需继续训练。")
+        return metrics
+    for epoch in range(metrics["epoch"] + 1, cfg.train.flow_epochs + 1):
         metrics = _train_flow_epoch(
             flow, vae, train_loader, optimizer, cfg, device, epoch, metrics["step"]
         )
+        save_checkpoint(
+            cfg.paths.flow_checkpoint,
+            {
+                "model": flow.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "metrics": metrics,
+            },
+        )
         if cfg.train.max_train_steps is not None and metrics["step"] >= cfg.train.max_train_steps:
             break
-    save_checkpoint(
-        cfg.paths.flow_checkpoint,
-        {"model": flow.state_dict(), "optimizer": optimizer.state_dict(), "metrics": metrics},
-    )
     return metrics
 
 

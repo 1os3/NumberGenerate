@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from config import AppConfig, load_config
 from data import get_mnist_loaders
 from model import VAE
-from train.common import prepare_runtime, save_checkpoint
+from train.common import load_latest_training_state, prepare_runtime, save_checkpoint
 from train.vae_trainer_checks import check_vae_batch, check_vae_training_config
 
 
@@ -39,17 +39,29 @@ def train_vae(cfg: AppConfig) -> dict:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.train.vae_lr, weight_decay=cfg.train.weight_decay
     )
-    metrics = {"epoch": 0, "step": 0, "loss": float("nan")}
-    for epoch in range(1, cfg.train.vae_epochs + 1):
+    metrics = load_latest_training_state(
+        cfg.paths.vae_checkpoint, model, optimizer, device, "VAE"
+    )
+    if cfg.train.max_train_steps is not None and metrics["step"] >= cfg.train.max_train_steps:
+        print("VAE 已达到 train.max_train_steps，无需继续训练。")
+        return metrics
+    if metrics["epoch"] >= cfg.train.vae_epochs:
+        print("VAE checkpoint 已达到配置的目标 epoch，无需继续训练。")
+        return metrics
+    for epoch in range(metrics["epoch"] + 1, cfg.train.vae_epochs + 1):
         metrics = _train_vae_epoch(
             model, train_loader, optimizer, cfg, device, epoch, metrics["step"]
         )
+        save_checkpoint(
+            cfg.paths.vae_checkpoint,
+            {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "metrics": metrics,
+            },
+        )
         if cfg.train.max_train_steps is not None and metrics["step"] >= cfg.train.max_train_steps:
             break
-    save_checkpoint(
-        cfg.paths.vae_checkpoint,
-        {"model": model.state_dict(), "optimizer": optimizer.state_dict(), "metrics": metrics},
-    )
     return metrics
 
 
