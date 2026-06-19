@@ -274,7 +274,7 @@ vis/                 生成过程和 PCA 可视化
 tests/               配置、形状、损失和条件注入测试
 Doc/                 开发规范与项目索引
 datasets/            MNIST 下载目录，运行后生成，默认被 git 忽略
-checkpoints/         训练权重目录，运行后生成，默认被 git 忽略
+ckpt/                训练权重目录，运行后生成，默认被 git 忽略
 outputs/             可视化输出目录，运行后生成，默认被 git 忽略
 logs/                日志目录，运行后生成，默认被 git 忽略
 ```
@@ -286,7 +286,7 @@ logs/                日志目录，运行后生成，默认被 git 忽略
 | 配置键 | 默认值 | 说明 |
 | --- | --- | --- |
 | `paths.data_dir` | `datasets` | MNIST 下载目录 |
-| `paths.checkpoint_dir` | `checkpoints` | 权重保存目录 |
+| `paths.checkpoint_dir` | `ckpt` | 权重保存目录 |
 | `paths.output_dir` | `outputs` | 可视化输出目录 |
 | `data.batch_size` | `128` | 训练 batch size |
 | `train.device` | `auto` | 自动选择 CUDA 或 CPU |
@@ -345,11 +345,11 @@ python -m venv .venv
 3. 创建并激活虚拟环境，或使用已有 Python 环境。
 4. 执行 `pip install -r requirements.txt`。
 5. 运行 `python -m unittest discover -s tests` 确认环境可用。
-6. 运行 `python -m train.vae_trainer` 生成 `checkpoints/vae.pt`。
-7. 运行 `python -m train.flow_trainer` 生成 `checkpoints/flow.pt`。
+6. 运行 `python -m train.vae_trainer` 生成 `ckpt/vae.pt`。
+7. 运行 `python -m train.flow_trainer` 生成 `ckpt/flow.pt`。
 8. 调用可视化 API，检查 `outputs/` 下的生成图和 PCA 图。
 
-项目所有运行产物默认都写入项目目录内。`datasets/`、`checkpoints/`、`outputs/`、`logs/` 已被 `.gitignore` 忽略。
+项目所有运行产物默认都写入项目目录内。`datasets/`、`ckpt/`、`outputs/`、`logs/` 已被 `.gitignore` 忽略。
 
 ## 训练命令
 
@@ -362,7 +362,7 @@ python -m venv .venv
 训练完成后生成：
 
 ```text
-checkpoints/vae.pt
+ckpt/vae.pt
 ```
 
 训练 Flow：
@@ -374,7 +374,7 @@ checkpoints/vae.pt
 训练完成后生成：
 
 ```text
-checkpoints/flow.pt
+ckpt/flow.pt
 ```
 
 使用调试配置：
@@ -386,10 +386,16 @@ checkpoints/flow.pt
 
 ## 生成与可视化命令
 
-先确保 `checkpoints/vae.pt` 和 `checkpoints/flow.pt` 已存在。
+先确保 `ckpt/vae.pt` 和 `ckpt/flow.pt` 已存在。
 
 ```powershell
-.\.venv\Scripts\python.exe -c "from config import load_config; from data import get_mnist_loaders; from model import VAE, FlowModel; from train.common import prepare_runtime, load_checkpoint; from vis import save_generation_steps, save_flow_feature_pca, save_vae_latent_pca; cfg=load_config(); device=prepare_runtime(cfg); vae=VAE(cfg).to(device); flow=FlowModel(cfg).to(device); vae.load_state_dict(load_checkpoint(cfg.paths.vae_checkpoint, device)['model']); flow.load_state_dict(load_checkpoint(cfg.paths.flow_checkpoint, device)['model']); _, test_loader=get_mnist_loaders(cfg); print(save_generation_steps(flow, vae, cfg)); print(save_flow_feature_pca(flow, vae, test_loader, cfg)); print(save_vae_latent_pca(vae, test_loader, cfg))"
+.\.venv\Scripts\python.exe -m vis.visualize
+```
+
+使用调试配置或自定义配置：
+
+```powershell
+.\.venv\Scripts\python.exe -m vis.visualize --config config/debug.yaml
 ```
 
 默认输出：
@@ -400,7 +406,14 @@ outputs/flow_feature_pca.png
 outputs/vae_latent_pca.png
 ```
 
-直接调用采样函数：
+如果缺少 checkpoint，命令会提示先运行：
+
+```powershell
+.\.venv\Scripts\python.exe -m train.vae_trainer
+.\.venv\Scripts\python.exe -m train.flow_trainer
+```
+
+直接在代码中调用采样函数：
 
 ```python
 import torch

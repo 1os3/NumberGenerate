@@ -36,6 +36,7 @@
 ## vis/ — 可视化与日志渲染
 
 - [vis/plots.py](../vis/plots.py) — 保存生成结果、Flow 特征 PCA 和 VAE 潜空间 PCA 可视化
+- [vis/visualize.py](../vis/visualize.py) — 一键加载训练权重并生成全部可视化图
 
 ## tests/ — 自动化验证
 

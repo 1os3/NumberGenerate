@@ -112,6 +112,7 @@ datasets/
 data/preprocessed/
 models/
 checkpoints/
+ckpt/
 dinov3-vits16plus-pretrain-lvd1689m/
 *.h5
 *.pt

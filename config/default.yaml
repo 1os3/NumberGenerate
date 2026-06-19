@@ -1,10 +1,10 @@
 paths:
   data_dir: datasets
-  checkpoint_dir: checkpoints
+  checkpoint_dir: ckpt
   output_dir: outputs
   log_dir: logs
-  vae_checkpoint: checkpoints/vae.pt
-  flow_checkpoint: checkpoints/flow.pt
+  vae_checkpoint: ckpt/vae.pt
+  flow_checkpoint: ckpt/flow.pt
 
 data:
   batch_size: 128
@@ -17,8 +17,8 @@ train:
   device: auto
   vae_epochs: 30
   flow_epochs: 50
-  vae_lr: 0.001
-  flow_lr: 0.0002
+  vae_lr: 0.0001
+  flow_lr: 0.0001
   weight_decay: 0.000001
   vae_beta: 0.0001
   grad_clip: 1.0
