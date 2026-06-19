@@ -18,7 +18,7 @@ import torch
 from config import load_config
 from config.schema import build_config
 from model import ConditionalDepthwiseSeparableBlock, FlowModel, LayerNorm2d, VAE
-from train import flow_matching_loss, sample_flow, vae_loss
+from train import flow_matching_loss, sample_flow, sample_vae_posterior, vae_loss
 
 
 class ConfigAndShapeTests(unittest.TestCase):
@@ -47,6 +47,9 @@ class ConfigAndShapeTests(unittest.TestCase):
         recon, mu, logvar = vae(images)
         self.assertEqual(tuple(mu.shape), (2, 32, 14, 14))
         self.assertEqual(tuple(recon.shape), tuple(images.shape))
+        posterior_sample = sample_vae_posterior(vae, images)
+        self.assertEqual(tuple(posterior_sample.shape), tuple(mu.shape))
+        self.assertFalse(torch.equal(posterior_sample, mu))
         loss = vae_loss(recon, images, mu, logvar, self.cfg)
         loss.backward()
         self.assertEqual(loss.ndim, 0)

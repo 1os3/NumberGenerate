@@ -1,7 +1,7 @@
 """保存生成结果、Flow 特征图、Flow 特征 PCA 和 VAE 潜空间 PCA 可视化。
 
 模块: vis/plots.py
-依赖: pathlib, torch, matplotlib, config.schema, model, train.sampling, vis.plots_checks
+依赖: pathlib, torch, matplotlib, config.schema, model, train.flow_trainer, train.sampling, vis.plots_checks
 读取配置: paths.output_dir, model.num_classes, sample.history_steps, sample.sampling_steps, visual.pca_samples, visual.feature_map_channels, visual.feature_map_time
 对外接口:
     - save_generation_steps(flow, vae, cfg) -> Path
@@ -19,6 +19,7 @@ import torch
 
 from config.schema import AppConfig
 from model import FlowModel, VAE
+from train.flow_trainer import sample_vae_posterior
 from train.sampling import sample_flow
 from vis.plots_checks import check_visual_config, check_visual_images
 
@@ -46,9 +47,9 @@ def save_flow_feature_maps(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) ->
     images, labels = _first_batch(loader)
     image = images[:1].to(device)
     label = labels[:1].to(device, dtype=torch.long)
-    mu, _ = vae.encode(image)
+    z = sample_vae_posterior(vae, image)
     t = torch.full((1,), cfg.visual.feature_map_time, device=device)
-    features = flow.extract_features(mu, t, label)
+    features = flow.extract_features(z, t, label)
     feature_maps = [
         feature[0, : cfg.visual.feature_map_channels].detach().cpu() for feature in features
     ]
@@ -67,9 +68,9 @@ def save_flow_feature_pca(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) -> 
     images, labels = _collect_images(loader, cfg)
     images = images.to(device)
     labels = labels.to(device, dtype=torch.long)
-    mu, _ = vae.encode(images)
-    t = torch.full((mu.shape[0],), 0.5, device=device)
-    features = flow.extract_features(mu, t, labels)[-1].mean(dim=(2, 3))
+    z = sample_vae_posterior(vae, images)
+    t = torch.full((z.shape[0],), 0.5, device=device)
+    features = flow.extract_features(z, t, labels)[-1].mean(dim=(2, 3))
     points = _pca_2d(features.detach().cpu())
     path = cfg.paths.output_dir / "flow_feature_pca.png"
     _save_scatter(points, labels.cpu(), path, "Flow feature PCA")

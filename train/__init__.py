@@ -5,6 +5,7 @@ from importlib import import_module
 
 _EXPORTS = {
     "flow_matching_loss": ("train.flow_trainer", "flow_matching_loss"),
+    "sample_vae_posterior": ("train.flow_trainer", "sample_vae_posterior"),
     "sample_flow": ("train.sampling", "sample_flow"),
     "train_flow": ("train.flow_trainer", "train_flow"),
     "train_vae": ("train.vae_trainer", "train_vae"),
@@ -13,6 +14,7 @@ _EXPORTS = {
 
 __all__ = [
     "flow_matching_loss",
+    "sample_vae_posterior",
     "sample_flow",
     "train_flow",
     "train_vae",

@@ -5,8 +5,9 @@
 读取配置: train.flow_epochs, train.flow_lr, train.weight_decay, train.grad_clip, train.log_interval, train.max_train_steps, sample.sampling_steps, paths.vae_checkpoint, paths.flow_checkpoint
 对外接口:
     - train_flow(cfg) -> dict
+    - sample_vae_posterior(vae, images) -> Tensor
     - flow_matching_loss(pred_velocity, target_velocity) -> Tensor
-说明: Flow 训练冻结 VAE，只在潜空间学习从噪声到数据潜变量的速度场。
+说明: Flow 训练冻结 VAE，只在潜空间学习从高斯噪声到 VAE posterior 样本的速度场。
 """
 
 from __future__ import annotations
@@ -62,6 +63,20 @@ def flow_matching_loss(
     return F.mse_loss(pred_velocity, target_velocity)
 
 
+def sample_vae_posterior(vae: VAE, images: torch.Tensor) -> torch.Tensor:
+    """从 VAE posterior 中采样 Flow 数据端潜变量。
+
+    参数:
+        vae: 已冻结或待评估的 VAE
+        images: 形状 [N,1,28,28] 的图像 batch
+    返回:
+        形状 [N,latent_channels,latent_size,latent_size] 的 posterior 样本
+    """
+
+    mu, logvar = vae.encode(images)
+    return vae.reparameterize(mu, logvar)
+
+
 def main() -> None:
     """命令行入口。"""
 
@@ -102,7 +117,7 @@ def _train_flow_epoch(
         images = images.to(device)
         labels = labels.to(device, dtype=torch.long)
         with torch.no_grad():
-            z_1, _ = vae.encode(images)
+            z_1 = sample_vae_posterior(vae, images)
         z_0 = torch.randn_like(z_1)
         time_index = torch.randint(0, cfg.sample.sampling_steps, (z_1.shape[0],), device=device)
         t = time_index.float() / cfg.sample.sampling_steps
