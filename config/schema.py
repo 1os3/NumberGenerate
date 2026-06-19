@@ -36,6 +36,7 @@ class DataConfig:
     num_workers: int
     download: bool
     pin_memory: bool
+    binarize_threshold: float
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,9 @@ class TrainConfig:
     weight_decay: float
     vae_kl_weight: float
     grad_clip: float
+    grad_monitor_enabled: bool
+    grad_small_threshold: float
+    grad_small_warn_ratio: float
     log_interval: int
     max_train_steps: int | None
 
@@ -152,6 +156,9 @@ def _build_data(raw: dict[str, Any]) -> DataConfig:
         num_workers=_non_negative_int(raw, "num_workers", "data.num_workers"),
         download=_boolean(raw, "download", "data.download"),
         pin_memory=_boolean(raw, "pin_memory", "data.pin_memory"),
+        binarize_threshold=_unit_interval_float(
+            raw, "binarize_threshold", "data.binarize_threshold"
+        ),
     )
 
 
@@ -168,6 +175,15 @@ def _build_train(raw: dict[str, Any]) -> TrainConfig:
             raw, "vae_kl_weight", "train.vae_kl_weight"
         ),
         grad_clip=_positive_float(raw, "grad_clip", "train.grad_clip"),
+        grad_monitor_enabled=_boolean(
+            raw, "grad_monitor_enabled", "train.grad_monitor_enabled"
+        ),
+        grad_small_threshold=_positive_float(
+            raw, "grad_small_threshold", "train.grad_small_threshold"
+        ),
+        grad_small_warn_ratio=_unit_interval_float(
+            raw, "grad_small_warn_ratio", "train.grad_small_warn_ratio"
+        ),
         log_interval=_positive_int(raw, "log_interval", "train.log_interval"),
         max_train_steps=_optional_positive_int(
             raw, "max_train_steps", "train.max_train_steps"
@@ -322,6 +338,8 @@ def _check_config_relations(cfg: AppConfig) -> None:
         raise ValueError("model.image_size 必须能被 2 整除。")
     if cfg.model.latent_size != expected_latent_size:
         raise ValueError("model.latent_size 必须等于 model.image_size // 2。")
+    if cfg.model.image_channels != 2:
+        raise ValueError("model.image_channels 必须为 2，对应 [background, foreground]。")
     if cfg.sample.history_steps > cfg.sample.sampling_steps:
         raise ValueError("sample.history_steps 不得大于 sample.sampling_steps。")
     if cfg.visual.feature_map_channels > cfg.model.flow_hidden_channels:

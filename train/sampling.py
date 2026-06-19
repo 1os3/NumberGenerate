@@ -51,13 +51,24 @@ def sample_flow(
     vae.eval()
     history = []
     step_size = 1.0 / cfg.sample.sampling_steps
-    history_interval = max(1, cfg.sample.sampling_steps // cfg.sample.history_steps)
+    history_save_steps = _history_save_steps(
+        cfg.sample.sampling_steps, cfg.sample.history_steps
+    )
     for step in range(cfg.sample.sampling_steps):
         t = torch.full((labels.shape[0],), step * step_size, device=device)
         z = z + step_size * flow(z, t, labels)
-        if return_history and ((step + 1) % history_interval == 0):
+        if return_history and (step + 1) in history_save_steps:
             history.append(vae.decode(z).detach().cpu())
     images = vae.decode(z).clamp(0, 1).detach().cpu()
     if not return_history:
         return images
     return images, torch.stack(history).clamp(0, 1)
+
+
+def _history_save_steps(sampling_steps: int, history_steps: int) -> set[int]:
+    if history_steps == 1:
+        return {sampling_steps}
+    return {
+        1 + round(index * (sampling_steps - 1) / (history_steps - 1))
+        for index in range(history_steps)
+    }

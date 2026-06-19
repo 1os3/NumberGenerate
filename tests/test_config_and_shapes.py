@@ -18,9 +18,16 @@ import torch
 
 from config import load_config
 from config.schema import build_config
+from data import mnist_to_presence_channels
 from model import ConditionalDepthwiseSeparableBlock, FlowModel, LayerNorm2d, VAE
-from train import flow_matching_loss, sample_flow, sample_vae_posterior, vae_loss
-from train.common import load_latest_training_state, save_checkpoint
+from train import (
+    flow_matching_loss,
+    sample_flow,
+    sample_flow_time,
+    sample_vae_posterior,
+    vae_loss,
+)
+from train.common import load_latest_training_state, save_checkpoint, summarize_gradients
 from vis.visualize_checks import check_visualization_checkpoints
 
 
@@ -46,7 +53,7 @@ class ConfigAndShapeTests(unittest.TestCase):
 
         vae = VAE(self.cfg)
         self.assertIsInstance(vae.encoder.latent_norm, LayerNorm2d)
-        images = torch.rand(2, 1, 28, 28)
+        images = _binary_presence_batch(2)
         recon, mu, logvar = vae(images)
         self.assertEqual(tuple(mu.shape), (2, 32, 14, 14))
         self.assertEqual(tuple(recon.shape), tuple(images.shape))
@@ -81,13 +88,51 @@ class ConfigAndShapeTests(unittest.TestCase):
         self.assertEqual(loss.ndim, 0)
 
     def test_sample_flow_shape(self) -> None:
-        """采样函数应输出 [N,1,28,28] 图像。"""
+        """采样函数应输出 [N,2,28,28] 二通道图像。"""
 
         vae = VAE(self.cfg)
         flow = FlowModel(self.cfg)
         labels = torch.tensor([0, 1], dtype=torch.long)
         images = sample_flow(flow, vae, labels, self.cfg)
-        self.assertEqual(tuple(images.shape), (2, 1, 28, 28))
+        self.assertEqual(tuple(images.shape), (2, 2, 28, 28))
+
+    def test_sample_flow_history_uses_configured_frame_count(self) -> None:
+        """生成历史应精确返回 sample.history_steps 个均匀抽样帧。"""
+
+        cfg = replace(
+            self.cfg,
+            sample=replace(self.cfg.sample, sampling_steps=5, history_steps=3),
+        )
+        vae = VAE(cfg)
+        flow = FlowModel(cfg)
+        labels = torch.tensor([0, 1], dtype=torch.long)
+        images, history = sample_flow(flow, vae, labels, cfg, return_history=True)
+        self.assertEqual(tuple(images.shape), (2, 2, 28, 28))
+        self.assertEqual(tuple(history.shape), (3, 2, 2, 28, 28))
+
+    def test_mnist_transform_creates_presence_channels(self) -> None:
+        """MNIST transform 应输出 background/foreground 二通道 one-hot 表示。"""
+
+        image = torch.tensor([[[0.0, 0.75], [0.25, 1.0]]])
+        transformed = mnist_to_presence_channels(image, threshold=0.5)
+        expected = torch.tensor(
+            [
+                [[1.0, 0.0], [1.0, 0.0]],
+                [[0.0, 1.0], [0.0, 1.0]],
+            ]
+        )
+        self.assertTrue(torch.equal(transformed, expected))
+
+    def test_flow_training_time_is_continuous(self) -> None:
+        """Flow 训练时间应从 [0,1) 连续均匀采样。"""
+
+        times = sample_flow_time(128, torch.device("cpu"))
+        self.assertEqual(tuple(times.shape), (128,))
+        self.assertTrue(torch.all(times >= 0))
+        self.assertTrue(torch.all(times < 1))
+        scaled = times * 32
+        non_grid = torch.abs(scaled - scaled.round()) > 1e-6
+        self.assertGreater(int(non_grid.sum().item()), 120)
 
     def test_training_checkpoint_resume_restores_state(self) -> None:
         """断点续训应恢复模型参数、优化器状态和最新指标。"""
@@ -125,6 +170,18 @@ class ConfigAndShapeTests(unittest.TestCase):
         finally:
             if path.exists():
                 path.unlink()
+
+    def test_gradient_summary_detects_small_gradients(self) -> None:
+        """梯度监测应能统计小梯度和零梯度比例。"""
+
+        model = torch.nn.Linear(3, 1)
+        output = model(torch.zeros(2, 3)).sum()
+        output.backward()
+        stats = summarize_gradients(model, small_threshold=1e-8)
+        self.assertGreater(stats["grad_elements"], 0)
+        self.assertGreater(stats["grad_small_ratio"], 0.0)
+        self.assertGreater(stats["grad_zero_ratio"], 0.0)
+        self.assertGreater(stats["grad_max_abs"], 0.0)
 
     def test_visualization_vae_mode_does_not_require_flow_checkpoint(self) -> None:
         """VAE-only 可视化只应检查 VAE 权重，不应要求 Flow 权重。"""
@@ -167,6 +224,7 @@ def _build_test_config():
             "num_workers": 0,
             "download": False,
             "pin_memory": False,
+            "binarize_threshold": 0.5,
         },
         "train": {
             "seed": 42,
@@ -178,11 +236,14 @@ def _build_test_config():
             "weight_decay": 0.000001,
             "vae_kl_weight": 0.0001,
             "grad_clip": 1.0,
+            "grad_monitor_enabled": True,
+            "grad_small_threshold": 0.00000001,
+            "grad_small_warn_ratio": 0.99,
             "log_interval": 1,
             "max_train_steps": 1,
         },
         "model": {
-            "image_channels": 1,
+            "image_channels": 2,
             "image_size": 28,
             "num_classes": 10,
             "vae_hidden_channels": 64,
@@ -207,6 +268,14 @@ def _build_test_config():
         },
     }
     return build_config(raw, Path.cwd())
+
+
+def _binary_presence_batch(batch_size: int) -> torch.Tensor:
+    images = torch.zeros(batch_size, 2, 28, 28)
+    images[:, 0] = 1.0
+    images[:, 0, 8:20, 10:18] = 0.0
+    images[:, 1, 8:20, 10:18] = 1.0
+    return images
 
 
 if __name__ == "__main__":

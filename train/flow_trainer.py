@@ -2,12 +2,13 @@
 
 模块: train/flow_trainer.py
 依赖: argparse, torch, torch.nn.functional, config, data.mnist, model, train.common
-读取配置: train.flow_epochs, train.flow_lr, train.weight_decay, train.grad_clip, train.log_interval, train.max_train_steps, sample.sampling_steps, paths.vae_checkpoint, paths.flow_checkpoint
+读取配置: train.flow_epochs, train.flow_lr, train.weight_decay, train.grad_clip, train.grad_monitor_enabled, train.grad_small_threshold, train.grad_small_warn_ratio, train.log_interval, train.max_train_steps, paths.vae_checkpoint, paths.flow_checkpoint
 对外接口:
     - train_flow(cfg) -> dict
     - sample_vae_posterior(vae, images) -> Tensor
+    - sample_flow_time(batch_size, device) -> Tensor
     - flow_matching_loss(pred_velocity, target_velocity) -> Tensor
-说明: Flow 训练冻结 VAE，只在潜空间学习从高斯噪声到 VAE posterior 样本的速度场。
+说明: Flow 训练冻结 VAE，用连续时间 t 在潜空间学习从高斯噪声到 VAE posterior 样本的速度场。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from train.common import (
     load_latest_training_state,
     prepare_runtime,
     save_checkpoint,
+    summarize_gradients,
 )
 from train.flow_trainer_checks import check_flow_batch, check_flow_training_config
 
@@ -94,6 +96,19 @@ def sample_vae_posterior(vae: VAE, images: torch.Tensor) -> torch.Tensor:
     return vae.reparameterize(mu, logvar)
 
 
+def sample_flow_time(batch_size: int, device: torch.device) -> torch.Tensor:
+    """为 Flow Matching 训练采样连续时间 t。
+
+    参数:
+        batch_size: 当前 batch 的样本数
+        device: 时间张量所在设备
+    返回:
+        形状 [N]、范围 [0,1) 的连续随机时间
+    """
+
+    return torch.rand(batch_size, device=device)
+
+
 def main() -> None:
     """命令行入口。"""
 
@@ -136,8 +151,7 @@ def _train_flow_epoch(
         with torch.no_grad():
             z_1 = sample_vae_posterior(vae, images)
         z_0 = torch.randn_like(z_1)
-        time_index = torch.randint(0, cfg.sample.sampling_steps, (z_1.shape[0],), device=device)
-        t = time_index.float() / cfg.sample.sampling_steps
+        t = sample_flow_time(z_1.shape[0], device)
         view_t = t.view(-1, 1, 1, 1)
         z_t = (1 - view_t) * z_0 + view_t * z_1
         target_velocity = z_1 - z_0
@@ -145,13 +159,33 @@ def _train_flow_epoch(
         pred_velocity = flow(z_t, t, labels)
         loss = flow_matching_loss(pred_velocity, target_velocity)
         loss.backward()
+        should_log = global_step % cfg.train.log_interval == 0
+        grad_stats = None
+        if cfg.train.grad_monitor_enabled and should_log:
+            grad_stats = summarize_gradients(flow, cfg.train.grad_small_threshold)
         torch.nn.utils.clip_grad_norm_(flow.parameters(), cfg.train.grad_clip)
         optimizer.step()
         running_loss += loss.item()
         local_step = step
         last_global_step = global_step
-        if global_step % cfg.train.log_interval == 0:
-            print({"epoch": epoch, "step": global_step, "loss": running_loss / step})
+        if should_log:
+            log = {"epoch": epoch, "step": global_step, "loss": running_loss / step}
+            if grad_stats is not None:
+                log.update(grad_stats)
+            print(log)
+            if (
+                grad_stats is not None
+                and grad_stats["grad_small_ratio"] >= cfg.train.grad_small_warn_ratio
+            ):
+                print(
+                    {
+                        "epoch": epoch,
+                        "step": global_step,
+                        "warning": "small gradients",
+                        "threshold": cfg.train.grad_small_threshold,
+                        "small_ratio": grad_stats["grad_small_ratio"],
+                    }
+                )
         if cfg.train.max_train_steps is not None and global_step >= cfg.train.max_train_steps:
             break
     return {"epoch": epoch, "step": last_global_step, "loss": running_loss / max(1, local_step)}

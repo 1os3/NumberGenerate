@@ -8,7 +8,7 @@
     - VAE.encode(x) -> tuple[Tensor, Tensor]
     - VAE.decode(z) -> Tensor
     - VAE.forward(x) -> tuple[Tensor, Tensor, Tensor]
-说明: VAE 不接收时间或数字标签，全部使用普通 LayerNorm2d 和卷积。
+说明: VAE 不接收时间或数字标签，输入和输出都是 [background, foreground] 二通道概率图。
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class VAEDecoder(nn.Module):
         self.out = nn.Conv2d(hidden, cfg.model.image_channels, kernel_size=3, padding=1)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """输出范围在 [0,1] 的重建图像。"""
+        """输出范围在 [0,1] 的 background/foreground 重建概率。"""
 
         check_latent_batch(z, self.cfg)
         hidden = self.block(z)

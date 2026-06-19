@@ -22,6 +22,8 @@ from vis.plots import (
     save_flow_feature_pca_map,
     save_flow_feature_pca,
     save_generation_steps,
+    save_vae_kl_map,
+    save_vae_latent_energy_map,
     save_vae_latent_distribution,
     save_vae_latent_pca,
     save_vae_reconstruction,
@@ -48,6 +50,8 @@ def run_visualization(cfg: AppConfig, mode: str = "all") -> dict[str, Path]:
         "vae_reconstruction": save_vae_reconstruction(vae, test_loader, cfg),
         "vae_latent_pca": save_vae_latent_pca(vae, test_loader, cfg),
         "vae_latent_distribution": save_vae_latent_distribution(vae, test_loader, cfg),
+        "vae_kl_map": save_vae_kl_map(vae, test_loader, cfg),
+        "vae_latent_energy_map": save_vae_latent_energy_map(vae, test_loader, cfg),
     }
     if mode == "vae":
         return vae_outputs
@@ -77,7 +81,7 @@ def main() -> None:
     parser.add_argument(
         "--only-vae",
         action="store_true",
-        help="等价于 --mode vae，只输出 VAE 重构、PCA 和分布图",
+        help="等价于 --mode vae，只输出 VAE 重构、PCA、分布和空间诊断图",
     )
     args = parser.parse_args()
     mode = "vae" if args.only_vae else args.mode

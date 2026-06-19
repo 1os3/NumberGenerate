@@ -9,6 +9,7 @@
     - load_checkpoint(path, device) -> dict
     - empty_training_metrics() -> dict
     - load_latest_training_state(path, model, optimizer, device, label) -> dict
+    - summarize_gradients(model, small_threshold) -> dict
 说明: 运行目录只在项目目录内创建，避免训练产物散落到外部。
 """
 
@@ -109,6 +110,59 @@ def load_latest_training_state(
         f"下一轮从 epoch {restored['epoch'] + 1} 开始。"
     )
     return restored
+
+
+def summarize_gradients(
+    model: torch.nn.Module, small_threshold: float
+) -> dict[str, float | int]:
+    """统计模型当前梯度的整体幅度和小梯度比例。
+
+    参数:
+        model: 已完成 loss.backward() 的模型
+        small_threshold: 小梯度判定阈值，使用 abs(grad) < small_threshold
+    返回:
+        包含平均绝对梯度、最大绝对梯度、小梯度比例等指标的字典
+    """
+
+    total_elements = 0
+    small_elements = 0
+    zero_elements = 0
+    no_grad_tensors = 0
+    sum_abs = 0.0
+    max_abs = 0.0
+    sum_square = 0.0
+    for parameter in model.parameters():
+        if not parameter.requires_grad:
+            continue
+        if parameter.grad is None:
+            no_grad_tensors += 1
+            continue
+        grad_abs = parameter.grad.detach().abs()
+        total_elements += grad_abs.numel()
+        small_elements += int((grad_abs < small_threshold).sum().item())
+        zero_elements += int((grad_abs == 0).sum().item())
+        sum_abs += float(grad_abs.sum().item())
+        max_abs = max(max_abs, float(grad_abs.max().item()))
+        sum_square += float(grad_abs.pow(2).sum().item())
+    if total_elements == 0:
+        return {
+            "grad_mean_abs": 0.0,
+            "grad_max_abs": 0.0,
+            "grad_norm": 0.0,
+            "grad_small_ratio": 1.0,
+            "grad_zero_ratio": 1.0,
+            "grad_elements": 0,
+            "grad_no_grad_tensors": no_grad_tensors,
+        }
+    return {
+        "grad_mean_abs": sum_abs / total_elements,
+        "grad_max_abs": max_abs,
+        "grad_norm": sum_square**0.5,
+        "grad_small_ratio": small_elements / total_elements,
+        "grad_zero_ratio": zero_elements / total_elements,
+        "grad_elements": total_elements,
+        "grad_no_grad_tensors": no_grad_tensors,
+    }
 
 
 def _set_seed(seed: int) -> None:

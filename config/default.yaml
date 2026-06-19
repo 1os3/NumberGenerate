@@ -11,6 +11,7 @@ data:
   num_workers: 2                      # DataLoader 子进程数量；Windows 调试时可改为 0
   download: true                      # 本地没有 MNIST 时是否由 torchvision 自动下载
   pin_memory: false                   # CUDA 训练时可改为 true，加速 CPU 到 GPU 拷贝
+  binarize_threshold: 0.5             # MNIST 二值化阈值；> 阈值为 foreground，否则为 background
 
 train:
   seed: 42                            # 随机种子，用于复现实验
@@ -22,11 +23,14 @@ train:
   weight_decay: 0.000001              # AdamW 权重衰减系数
   vae_kl_weight: 0.001               # VAE KL 散度损失权重，不是 AdamW beta 参数
   grad_clip: 1.0                      # 梯度裁剪阈值，防止训练早期梯度过大
+  grad_monitor_enabled: true          # 是否在训练日志中监测小梯度比例
+  grad_small_threshold: 0.00000001    # 小梯度判定阈值；abs(grad) 小于该值会计入 small ratio
+  grad_small_warn_ratio: 0.99         # 小梯度比例超过该值时打印提示，范围 [0,1]
   log_interval: 100                   # 每隔多少个全局 step 打印一次训练日志
   max_train_steps: null               # 调试用总训练步数上限；null 表示不限制
 
 model:
-  image_channels: 1                   # MNIST 灰度图通道数
+  image_channels: 2                   # MNIST 二通道有/无表示：[background, foreground]
   image_size: 28                      # MNIST 图像边长
   num_classes: 10                     # MNIST 数字类别数量，标签范围为 0 到 9
   vae_hidden_channels: 64             # VAE 图像空间卷积隐藏通道数
@@ -39,8 +43,8 @@ model:
   condition_dim: 128                  # 时间条件和数字条件融合后的向量维度
 
 sample:
-  sampling_steps: 16                  # Flow 训练离散时间步数，也是采样 Euler 步数
-  history_steps: 16                   # 生成过程可视化保存的中间状态数量，不得大于 sampling_steps
+  sampling_steps: 32                  # 采样时 Euler 更新步数；Flow 训练使用连续随机时间 t
+  history_steps: 32                   # 生成过程可视化保存的中间状态数量；通常与 sampling_steps 保持一致，如需抽帧可设小
   num_samples_per_digit: 8            # 每个数字默认生成样本数，供后续批量采样或扩展可视化使用
 
 visual:

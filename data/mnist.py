@@ -2,10 +2,11 @@
 
 模块: data/mnist.py
 依赖: torch, torchvision, config.schema, data.mnist_checks
-读取配置: paths.data_dir, data.batch_size, data.num_workers, data.download, data.pin_memory, train.seed
+读取配置: paths.data_dir, data.batch_size, data.num_workers, data.download, data.pin_memory, data.binarize_threshold, train.seed
 对外接口:
     - get_mnist_loaders(cfg) -> tuple[DataLoader, DataLoader]
-说明: MNIST 图像只转换为 [0,1] 张量，不做额外标准化，便于教学观察。
+    - mnist_to_presence_channels(image, threshold) -> Tensor
+说明: MNIST 图像被转换为 [background, foreground] 二通道 one-hot 张量，便于 VAE 学习明确的有/无语义。
 """
 
 from __future__ import annotations
@@ -29,7 +30,16 @@ def get_mnist_loaders(cfg: AppConfig) -> tuple[DataLoader, DataLoader]:
 
     check_mnist_config(cfg)
     cfg.paths.data_dir.mkdir(parents=True, exist_ok=True)
-    transform = transforms.ToTensor()
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Lambda(
+                lambda image: mnist_to_presence_channels(
+                    image, cfg.data.binarize_threshold
+                )
+            ),
+        ]
+    )
     train_set = datasets.MNIST(
         root=str(cfg.paths.data_dir),
         train=True,
@@ -53,3 +63,18 @@ def get_mnist_loaders(cfg: AppConfig) -> tuple[DataLoader, DataLoader]:
         DataLoader(train_set, shuffle=True, generator=generator, **loader_kwargs),
         DataLoader(test_set, shuffle=False, **loader_kwargs),
     )
+
+
+def mnist_to_presence_channels(image: torch.Tensor, threshold: float) -> torch.Tensor:
+    """将单通道 MNIST 图像转换为 background/foreground 二通道表示。
+
+    参数:
+        image: 形状 [1,H,W]、范围 [0,1] 的 MNIST 图像
+        threshold: 二值化阈值，大于该值表示 foreground
+    返回:
+        形状 [2,H,W] 的 one-hot 张量，第 0 通道是 background，第 1 通道是 foreground
+    """
+
+    foreground = (image > threshold).to(dtype=image.dtype)
+    background = 1.0 - foreground
+    return torch.cat([background, foreground], dim=0)

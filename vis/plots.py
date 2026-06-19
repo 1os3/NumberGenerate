@@ -1,4 +1,4 @@
-"""保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量分布可视化。
+"""保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量诊断可视化。
 
 模块: vis/plots.py
 依赖: pathlib, torch, matplotlib, config.schema, model, train.flow_trainer, train.sampling, vis.plots_checks
@@ -10,6 +10,8 @@
     - save_vae_reconstruction(vae, loader, cfg) -> Path
     - save_vae_latent_pca(vae, loader, cfg) -> Path
     - save_vae_latent_distribution(vae, loader, cfg) -> Path
+    - save_vae_kl_map(vae, loader, cfg) -> Path
+    - save_vae_latent_energy_map(vae, loader, cfg) -> Path
 说明: 绘图库在函数内按需导入，便于缺依赖时给出明确错误。
 """
 
@@ -18,12 +20,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 from config.schema import AppConfig
 from model import FlowModel, VAE
 from train.flow_trainer import sample_vae_posterior
 from train.sampling import sample_flow
-from vis.plots_checks import check_visual_config, check_visual_images
+from vis.plots_checks import (
+    check_region_values,
+    check_visual_config,
+    check_visual_images,
+)
 
 
 def save_generation_steps(flow: FlowModel, vae: VAE, cfg: AppConfig) -> Path:
@@ -116,21 +123,78 @@ def save_vae_reconstruction(vae: VAE, loader, cfg: AppConfig) -> Path:
 
 @torch.no_grad()
 def save_vae_latent_distribution(vae: VAE, loader, cfg: AppConfig) -> Path:
-    """保存 VAE 潜变量均值、posterior 样本和标准差的分布图。"""
+    """按 MNIST 前景/背景保存 VAE 潜变量均值、标准差和 KL 分布图。"""
 
     check_visual_config(cfg)
     cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
     device = next(vae.parameters()).device
     images, _ = _collect_images(loader, cfg)
-    mu, logvar = vae.encode(images.to(device))
-    posterior = vae.reparameterize(mu, logvar)
+    images = images.to(device)
+    mu, logvar = vae.encode(images)
     std = torch.exp(0.5 * logvar)
+    kl = _kl_per_element(mu, logvar)
+    mask = _foreground_mask(images, mu.shape[-2:])
+    foreground = _region_stats(mu, std, kl, mask)
+    background = _region_stats(mu, std, kl, ~mask)
     path = cfg.paths.output_dir / "vae_latent_distribution.png"
     _save_vae_distribution(
-        mu.detach().cpu().flatten(),
-        posterior.detach().cpu().flatten(),
-        std.detach().cpu().flatten(),
+        foreground,
+        background,
         path,
+    )
+    return path
+
+
+@torch.no_grad()
+def save_vae_kl_map(vae: VAE, loader, cfg: AppConfig) -> Path:
+    """保存单张 MNIST 样本对应的空间 KL 强度图。"""
+
+    check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    device = next(vae.parameters()).device
+    images, labels = _first_batch(loader)
+    image = images[:1].to(device)
+    label = int(labels[0].item())
+    mu, logvar = vae.encode(image)
+    kl_map = _kl_per_element(mu, logvar).mean(dim=1)[0].detach().cpu()
+    mask = _foreground_mask(image, mu.shape[-2:])[0, 0].detach().cpu()
+    path = cfg.paths.output_dir / "vae_kl_map.png"
+    _save_latent_map(
+        _foreground_panel(image.cpu()[0]),
+        mask,
+        kl_map,
+        label,
+        path,
+        title="VAE spatial KL map",
+        map_title="KL per latent pixel",
+        cmap="magma",
+    )
+    return path
+
+
+@torch.no_grad()
+def save_vae_latent_energy_map(vae: VAE, loader, cfg: AppConfig) -> Path:
+    """保存单张 MNIST 样本对应的潜变量均值能量图。"""
+
+    check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    device = next(vae.parameters()).device
+    images, labels = _first_batch(loader)
+    image = images[:1].to(device)
+    label = int(labels[0].item())
+    mu, _ = vae.encode(image)
+    energy_map = mu.abs().mean(dim=1)[0].detach().cpu()
+    mask = _foreground_mask(image, mu.shape[-2:])[0, 0].detach().cpu()
+    path = cfg.paths.output_dir / "vae_latent_energy_map.png"
+    _save_latent_map(
+        _foreground_panel(image.cpu()[0]),
+        mask,
+        energy_map,
+        label,
+        path,
+        title="VAE latent energy map",
+        map_title="mean(abs(mu))",
+        cmap="viridis",
     )
     return path
 
@@ -157,6 +221,50 @@ def _first_batch(loader) -> tuple[torch.Tensor, torch.Tensor]:
         raise ValueError("可视化需要至少一个数据 batch。") from exc
 
 
+def _foreground_mask(images: torch.Tensor, latent_hw: tuple[int, int]) -> torch.Tensor:
+    downsampled = F.interpolate(_foreground_images(images), size=latent_hw, mode="area")
+    return downsampled > 0.05
+
+
+def _foreground_images(images: torch.Tensor) -> torch.Tensor:
+    if images.ndim != 4:
+        raise ValueError("images 必须是 [N,C,H,W] 张量。")
+    if images.shape[1] == 1:
+        return images[:, :1]
+    return images[:, 1:2]
+
+
+def _foreground_panel(image: torch.Tensor) -> torch.Tensor:
+    if image.ndim == 2:
+        return image
+    if image.ndim != 3:
+        raise ValueError("image 必须是 [C,H,W] 或 [H,W] 张量。")
+    if image.shape[0] == 1:
+        return image[0]
+    return image[1]
+
+
+def _kl_per_element(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
+    return -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+
+
+def _region_stats(
+    mu: torch.Tensor,
+    std: torch.Tensor,
+    kl: torch.Tensor,
+    mask: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    expanded_mask = mask.expand_as(mu)
+    stats = {
+        "mu": mu[expanded_mask].detach().cpu(),
+        "std": std[expanded_mask].detach().cpu(),
+        "kl": kl[expanded_mask].detach().cpu(),
+    }
+    for name, values in stats.items():
+        check_region_values(values, f"{name} region values")
+    return stats
+
+
 def _pca_2d(features: torch.Tensor) -> torch.Tensor:
     centered = features - features.mean(dim=0, keepdim=True)
     _, _, v = torch.pca_lowrank(centered, q=2)
@@ -179,7 +287,12 @@ def _save_step_grid(history: torch.Tensor, path: Path) -> None:
     for row in range(steps):
         for col in range(batch):
             axis = axes_grid[row][col]
-            axis.imshow(history[row, col, 0].numpy(), cmap="gray", vmin=0, vmax=1)
+            axis.imshow(
+                _foreground_panel(history[row, col]).numpy(),
+                cmap="gray",
+                vmin=0,
+                vmax=1,
+            )
             axis.axis("off")
     fig.tight_layout(pad=0.1)
     fig.savefig(path, dpi=160)
@@ -222,40 +335,91 @@ def _save_vae_reconstruction(
     path: Path,
 ) -> None:
     plt = _matplotlib()
-    error = (image - reconstruction).abs()
-    fig, axes = plt.subplots(1, 4, figsize=(8, 2.4))
+    input_foreground = _foreground_images(image)[0, 0]
+    recon_foreground = _foreground_images(reconstruction)[0, 0]
+    error = (input_foreground - recon_foreground).abs()
+    fig, axes = plt.subplots(1, 4, figsize=(8.8, 2.7), constrained_layout=True)
     panels = [
-        (image[0, 0], "MNIST input", "gray"),
-        (latent_rgb.permute(1, 2, 0), "Latent PCA 32x14x14", None),
-        (reconstruction[0, 0], "VAE reconstruction", "gray"),
-        (error[0, 0], "Absolute error", "magma"),
+        (input_foreground, "Input fg", "gray"),
+        (latent_rgb.permute(1, 2, 0), "Latent PCA", None),
+        (recon_foreground, "Recon fg", "gray"),
+        (error, "Abs error", "magma"),
     ]
     for axis, (panel, title, cmap) in zip(axes, panels):
-        axis.imshow(panel.numpy(), cmap=cmap, vmin=0 if cmap == "gray" else None, vmax=1 if cmap == "gray" else None)
-        axis.set_title(title, fontsize=8)
+        axis.imshow(
+            panel.numpy(),
+            cmap=cmap,
+            vmin=0 if cmap == "gray" else None,
+            vmax=1 if cmap == "gray" else None,
+        )
+        axis.set_title(title, fontsize=9)
         axis.axis("off")
-    fig.suptitle(f"VAE compression and reconstruction | label={label}", fontsize=10)
-    fig.tight_layout(pad=0.2)
-    fig.savefig(path, dpi=180)
+    fig.suptitle(f"VAE compression and reconstruction | label={label}", fontsize=11)
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _save_latent_map(
+    image: torch.Tensor,
+    mask: torch.Tensor,
+    values: torch.Tensor,
+    label: int,
+    path: Path,
+    title: str,
+    map_title: str,
+    cmap: str,
+) -> None:
+    plt = _matplotlib()
+    fig, axes = plt.subplots(1, 3, figsize=(8.4, 2.8), constrained_layout=True)
+    panels = [
+        (image, "Input", "gray"),
+        (mask.float(), "Foreground mask", "gray"),
+        (values, map_title, cmap),
+    ]
+    for axis, (panel, panel_title, panel_cmap) in zip(axes, panels):
+        image_plot = axis.imshow(panel.numpy(), cmap=panel_cmap)
+        axis.set_title(panel_title, fontsize=9)
+        axis.axis("off")
+        if panel_title == map_title:
+            fig.colorbar(image_plot, ax=axis, fraction=0.046, pad=0.04)
+    fig.suptitle(f"{title} | label={label}", fontsize=11)
+    fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
 def _save_vae_distribution(
-    mu: torch.Tensor, posterior: torch.Tensor, std: torch.Tensor, path: Path
+    foreground: dict[str, torch.Tensor],
+    background: dict[str, torch.Tensor],
+    path: Path,
 ) -> None:
     plt = _matplotlib()
-    xs = torch.linspace(-4, 4, 200)
-    normal = torch.exp(-0.5 * xs.pow(2)) / (2 * torch.pi) ** 0.5
-    fig, axes = plt.subplots(1, 2, figsize=(8, 3))
-    axes[0].hist(mu.numpy(), bins=80, density=True, alpha=0.55, label="mu")
-    axes[0].hist(posterior.numpy(), bins=80, density=True, alpha=0.45, label="posterior sample")
-    axes[0].plot(xs.numpy(), normal.numpy(), color="black", linewidth=1, label="N(0,1)")
-    axes[0].set_title("Latent value distribution")
-    axes[0].legend(fontsize=7)
-    axes[1].hist(std.numpy(), bins=80, density=True, alpha=0.7, color="tab:green")
-    axes[1].set_title("Posterior std distribution")
-    fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3.2), constrained_layout=True)
+    specs = [
+        ("mu", "Latent mu", 80),
+        ("std", "Posterior std", 80),
+        ("kl", "KL per element", 80),
+    ]
+    for axis, (name, title, bins) in zip(axes, specs):
+        fg = foreground[name]
+        bg = background[name]
+        axis.hist(
+            bg.numpy(),
+            bins=bins,
+            density=True,
+            alpha=0.52,
+            label=f"background mean={bg.mean().item():.3f}",
+        )
+        axis.hist(
+            fg.numpy(),
+            bins=bins,
+            density=True,
+            alpha=0.52,
+            label=f"foreground mean={fg.mean().item():.3f}",
+        )
+        axis.set_title(title, fontsize=10)
+        axis.legend(fontsize=7)
+    fig.suptitle("VAE foreground/background latent statistics", fontsize=11)
+    fig.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(fig)
 
 

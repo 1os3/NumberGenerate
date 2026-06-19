@@ -18,24 +18,24 @@
 
 ## data/ — 数据读取与预处理
 
-- [data/mnist.py](../data/mnist.py) — 构建 MNIST 数据集与 DataLoader
+- [data/mnist.py](../data/mnist.py) — 构建二通道有/无表示的 MNIST 数据集与 DataLoader
 
 ## model/ — 网络结构定义
 
 - [model/layers.py](../model/layers.py) — 提供 VAE 与 Flow 共用的卷积层和归一化层
-- [model/vae.py](../model/vae.py) — 定义无条件卷积 VAE
+- [model/vae.py](../model/vae.py) — 定义输入输出为 background/foreground 二通道概率图的无条件卷积 VAE
 - [model/flow.py](../model/flow.py) — 定义数字条件潜空间 Flow Matching 模型
 
 ## train/ — 训练 / 评估循环
 
-- [train/common.py](../train/common.py) — 提供训练脚本共用的随机种子、设备、checkpoint 保存和断点续训工具
+- [train/common.py](../train/common.py) — 提供训练脚本共用的随机种子、设备、checkpoint 保存、断点续训和梯度诊断工具
 - [train/vae_trainer.py](../train/vae_trainer.py) — 训练无条件 MNIST VAE
 - [train/flow_trainer.py](../train/flow_trainer.py) — 训练数字条件潜空间 Flow Matching 模型
 - [train/sampling.py](../train/sampling.py) — 提供 Flow Matching 生成采样函数
 
 ## vis/ — 可视化与日志渲染
 
-- [vis/plots.py](../vis/plots.py) — 保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量分布可视化
+- [vis/plots.py](../vis/plots.py) — 保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量空间诊断可视化
 - [vis/visualize.py](../vis/visualize.py) — 一键加载训练权重并按模式生成完整或仅 VAE 可视化图
 
 ## tests/ — 自动化验证

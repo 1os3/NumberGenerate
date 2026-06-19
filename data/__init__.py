@@ -5,9 +5,10 @@ from importlib import import_module
 
 _EXPORTS = {
     "get_mnist_loaders": ("data.mnist", "get_mnist_loaders"),
+    "mnist_to_presence_channels": ("data.mnist", "mnist_to_presence_channels"),
 }
 
-__all__ = ["get_mnist_loaders"]
+__all__ = ["get_mnist_loaders", "mnist_to_presence_channels"]
 
 
 def __getattr__(name: str):
