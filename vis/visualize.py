@@ -14,6 +14,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import torch
+
 from config import AppConfig, load_config
 from data import get_mnist_loaders
 from model import FlowModel, VAE
@@ -42,6 +44,8 @@ def run_visualization(cfg: AppConfig, mode: str = "all") -> dict[str, Path]:
 
     check_visualization_checkpoints(cfg, mode)
     device = prepare_runtime(cfg)
+    # prepare_runtime 用 train.seed 固定了随机数，这里改用非确定性种子，使每次生成结果不同
+    torch.seed()
     vae = VAE(cfg).to(device)
     vae.load_state_dict(load_checkpoint(cfg.paths.vae_checkpoint, device)["model"])
     vae.eval()

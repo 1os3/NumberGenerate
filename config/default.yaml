@@ -16,13 +16,13 @@ data:
 train:
   seed: 42                            # 随机种子，用于复现实验
   device: auto                        # 训练设备；auto 自动选择 cuda 或 cpu，也可显式写 cpu/cuda
-  vae_epochs: 100                      # VAE 训练轮数
-  flow_epochs: 100                     # Flow Matching 模型训练轮数
+  vae_epochs: 200                      # VAE 训练轮数
+  flow_epochs: 200                     # Flow Matching 模型训练轮数
   vae_lr: 0.0001                      # VAE AdamW 学习率
   flow_lr: 0.0001                     # Flow AdamW 学习率
   weight_decay: 0.000001              # AdamW 权重衰减系数
-  vae_kl_weight: 0.00025             # VAE KL 散度权重(β-VAE 的 β)；损失改为逐元素求和/对 batch 取均值后的等效值
-  grad_clip: 1.0                      # 梯度裁剪阈值，防止训练早期梯度过大
+  vae_kl_weight: 0.005             # VAE KL 散度权重(β-VAE 的 β)；损失改为逐元素求和/对 batch 取均值后的等效值
+  grad_clip: 1000.0                      # 梯度裁剪阈值，防止训练早期梯度爆炸
   grad_monitor_enabled: true          # 是否在训练日志中监测小梯度比例
   grad_small_threshold: 0.00000001    # 小梯度判定阈值；abs(grad) 小于该值会计入 small ratio
   grad_small_warn_ratio: 0.99         # 小梯度比例超过该值时打印提示，范围 [0,1]
@@ -33,10 +33,10 @@ model:
   image_channels: 2                   # MNIST 二通道有/无表示：[background, foreground]
   image_size: 28                      # MNIST 图像边长
   num_classes: 10                     # MNIST 数字类别数量，标签范围为 0 到 9
-  vae_hidden_channels: 64             # VAE 图像空间卷积隐藏通道数
-  latent_channels: 32                 # VAE 潜变量通道数，也是 Flow 输入/输出投影层的端点通道数
+  vae_hidden_channels: 32             # VAE 图像空间卷积隐藏通道数
+  latent_channels: 4                 # VAE 潜变量通道数，也是 Flow 输入/输出投影层的端点通道数
   latent_size: 14                     # VAE 潜变量空间边长；应等于 image_size // 2
-  flow_hidden_channels: 256           # Flow 主干隐藏通道数；输入投影 32->256，输出投影 256->32
+  flow_hidden_channels: 256           # Flow 主干隐藏通道数；输入投影 4->256，输出投影 256->4
   flow_depth: 8                       # Flow 条件 ConvNeXt 主干块数量
   convnext_expansion: 2               # ConvNeXt 块内 1x1 卷积通道扩展倍率
   time_frequencies: 16                # 时间 sin/cos 嵌入频率数量，输出维度为该值的 2 倍
