@@ -1,0 +1,48 @@
+paths:
+  data_dir: datasets
+  checkpoint_dir: checkpoints
+  output_dir: outputs
+  log_dir: logs
+  vae_checkpoint: checkpoints/vae.pt
+  flow_checkpoint: checkpoints/flow.pt
+
+data:
+  batch_size: 128
+  num_workers: 2
+  download: true
+  pin_memory: false
+
+train:
+  seed: 42
+  device: auto
+  vae_epochs: 30
+  flow_epochs: 50
+  vae_lr: 0.001
+  flow_lr: 0.0002
+  weight_decay: 0.000001
+  vae_beta: 0.0001
+  grad_clip: 1.0
+  log_interval: 100
+  max_train_steps: null
+
+model:
+  image_channels: 1
+  image_size: 28
+  num_classes: 10
+  vae_hidden_channels: 64
+  latent_channels: 64
+  latent_size: 14
+  flow_hidden_channels: 128
+  flow_depth: 8
+  convnext_expansion: 2
+  time_frequencies: 16
+  condition_dim: 128
+
+sample:
+  sampling_steps: 16
+  history_steps: 16
+  num_samples_per_digit: 8
+
+visual:
+  pca_samples: 512
+  grid_columns: 10
