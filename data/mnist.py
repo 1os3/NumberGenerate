@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -33,10 +35,9 @@ def get_mnist_loaders(cfg: AppConfig) -> tuple[DataLoader, DataLoader]:
     transform = transforms.Compose(
         [
             transforms.ToTensor(),
-            transforms.Lambda(
-                lambda image: mnist_to_presence_channels(
-                    image, cfg.data.binarize_threshold
-                )
+            partial(
+                mnist_to_presence_channels,
+                threshold=cfg.data.binarize_threshold,
             ),
         ]
     )

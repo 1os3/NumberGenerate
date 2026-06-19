@@ -5,7 +5,7 @@
 读取配置: train.vae_epochs, train.vae_lr, train.weight_decay, train.vae_kl_weight, train.grad_clip, train.grad_monitor_enabled, train.grad_small_threshold, train.grad_small_warn_ratio, train.log_interval, train.max_train_steps, paths.vae_checkpoint
 对外接口:
     - train_vae(cfg) -> dict
-    - vae_loss(recon, images, mu, logvar, cfg) -> Tensor
+    - vae_loss(recon_logits, images, mu, logvar, cfg) -> Tensor
 说明: VAE 训练只重建图像，不接收数字条件。
 """
 
@@ -71,16 +71,24 @@ def train_vae(cfg: AppConfig) -> dict:
 
 
 def vae_loss(
-    recon: torch.Tensor,
+    recon_logits: torch.Tensor,
     images: torch.Tensor,
     mu: torch.Tensor,
     logvar: torch.Tensor,
     cfg: AppConfig,
 ) -> torch.Tensor:
-    """计算 VAE 二通道 BCE 重建损失与 KL 正则之和。"""
+    """计算 VAE 二通道 BCE 重建损失与 KL 正则之和。
 
-    recon_loss = F.binary_cross_entropy(recon, images)
-    kl_loss = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
+    重建项接收 logits 并用 binary_cross_entropy_with_logits（数值稳定），
+    重建和 KL 都按「逐元素求和、对 batch 取均值」归一化，使 vae_kl_weight
+    成为标准 β-VAE 的 β 系数。
+    """
+
+    batch_size = images.shape[0]
+    recon_loss = F.binary_cross_entropy_with_logits(
+        recon_logits, images, reduction="sum"
+    ) / batch_size
+    kl_loss = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum() / batch_size
     return recon_loss + cfg.train.vae_kl_weight * kl_loss
 
 

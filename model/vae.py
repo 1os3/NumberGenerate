@@ -7,8 +7,10 @@
     - VAE(cfg) -> nn.Module
     - VAE.encode(x) -> tuple[Tensor, Tensor]
     - VAE.decode(z) -> Tensor
+    - VAE.decode_logits(z) -> Tensor
     - VAE.forward(x) -> tuple[Tensor, Tensor, Tensor]
-说明: VAE 不接收时间或数字标签，输入和输出都是 [background, foreground] 二通道概率图。
+说明: VAE 不接收时间或数字标签，输入是 [background, foreground] 二通道概率图；
+    decode 返回 [0,1] 概率，forward/decode_logits 返回 logits 供 bce_with_logits 使用。
 """
 
 from __future__ import annotations
@@ -60,13 +62,13 @@ class VAEDecoder(nn.Module):
         self.out = nn.Conv2d(hidden, cfg.model.image_channels, kernel_size=3, padding=1)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """输出范围在 [0,1] 的 background/foreground 重建概率。"""
+        """输出 background/foreground 重建 logits（未过 sigmoid）。"""
 
         check_latent_batch(z, self.cfg)
         hidden = self.block(z)
         hidden = self.expand(hidden)
         hidden = self.upsample(hidden)
-        return torch.sigmoid(self.out(hidden))
+        return self.out(hidden)
 
 
 class VAE(nn.Module):
@@ -85,7 +87,12 @@ class VAE(nn.Module):
         return self.encoder(x)
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
-        """根据潜变量重建图像。"""
+        """根据潜变量重建图像，返回范围在 [0,1] 的概率（采样和可视化用）。"""
+
+        return torch.sigmoid(self.decoder(z))
+
+    def decode_logits(self, z: torch.Tensor) -> torch.Tensor:
+        """根据潜变量输出重建 logits（训练用，配合 bce_with_logits 数值更稳定）。"""
 
         return self.decoder(z)
 
@@ -96,8 +103,8 @@ class VAE(nn.Module):
         return mu + torch.randn_like(std) * std
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """执行 VAE 前向传播并返回重建、均值和对数方差。"""
+        """执行 VAE 前向传播并返回重建 logits、均值和对数方差。"""
 
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
+        return self.decode_logits(z), mu, logvar
