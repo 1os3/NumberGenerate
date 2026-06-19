@@ -17,7 +17,7 @@ import torch
 
 from config import load_config
 from config.schema import build_config
-from model import ConditionalDepthwiseSeparableBlock, FlowModel, VAE
+from model import ConditionalDepthwiseSeparableBlock, FlowModel, LayerNorm2d, VAE
 from train import flow_matching_loss, sample_flow, vae_loss
 
 
@@ -42,9 +42,10 @@ class ConfigAndShapeTests(unittest.TestCase):
         """VAE encode/decode/forward 形状和损失应可反向传播。"""
 
         vae = VAE(self.cfg)
+        self.assertIsInstance(vae.encoder.latent_norm, LayerNorm2d)
         images = torch.rand(2, 1, 28, 28)
         recon, mu, logvar = vae(images)
-        self.assertEqual(tuple(mu.shape), (2, 64, 14, 14))
+        self.assertEqual(tuple(mu.shape), (2, 32, 14, 14))
         self.assertEqual(tuple(recon.shape), tuple(images.shape))
         loss = vae_loss(recon, images, mu, logvar, self.cfg)
         loss.backward()
@@ -54,11 +55,16 @@ class ConfigAndShapeTests(unittest.TestCase):
         """Flow 主干应使用条件块，输出速度形状应匹配潜变量。"""
 
         flow = FlowModel(self.cfg)
+        self.assertIsInstance(flow.output_norm, LayerNorm2d)
         blocks_are_conditional = [
             isinstance(block, ConditionalDepthwiseSeparableBlock) for block in flow.blocks
         ]
         self.assertTrue(all(blocks_are_conditional))
-        z_t = torch.randn(2, 64, 14, 14)
+        self.assertEqual(flow.input_projection.in_channels, 32)
+        self.assertEqual(flow.input_projection.out_channels, 256)
+        self.assertEqual(flow.output_projection.in_channels, 256)
+        self.assertEqual(flow.output_projection.out_channels, 32)
+        z_t = torch.randn(2, 32, 14, 14)
         t = torch.rand(2)
         labels = torch.tensor([0, 1], dtype=torch.long)
         pred = flow(z_t, t, labels)
@@ -102,7 +108,7 @@ def _build_test_config():
             "vae_lr": 0.001,
             "flow_lr": 0.0002,
             "weight_decay": 0.000001,
-            "vae_beta": 0.0001,
+            "vae_kl_weight": 0.0001,
             "grad_clip": 1.0,
             "log_interval": 1,
             "max_train_steps": 1,
@@ -112,9 +118,9 @@ def _build_test_config():
             "image_size": 28,
             "num_classes": 10,
             "vae_hidden_channels": 64,
-            "latent_channels": 64,
+            "latent_channels": 32,
             "latent_size": 14,
-            "flow_hidden_channels": 128,
+            "flow_hidden_channels": 256,
             "flow_depth": 8,
             "convnext_expansion": 2,
             "time_frequencies": 16,
@@ -128,6 +134,8 @@ def _build_test_config():
         "visual": {
             "pca_samples": 4,
             "grid_columns": 2,
+            "feature_map_channels": 2,
+            "feature_map_time": 0.5,
         },
     }
     return build_config(raw, Path.cwd())

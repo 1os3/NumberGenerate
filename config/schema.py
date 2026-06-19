@@ -49,7 +49,7 @@ class TrainConfig:
     vae_lr: float
     flow_lr: float
     weight_decay: float
-    vae_beta: float
+    vae_kl_weight: float
     grad_clip: float
     log_interval: int
     max_train_steps: int | None
@@ -87,6 +87,8 @@ class VisualConfig:
 
     pca_samples: int
     grid_columns: int
+    feature_map_channels: int
+    feature_map_time: float
 
 
 @dataclass(frozen=True)
@@ -162,7 +164,9 @@ def _build_train(raw: dict[str, Any]) -> TrainConfig:
         vae_lr=_positive_float(raw, "vae_lr", "train.vae_lr"),
         flow_lr=_positive_float(raw, "flow_lr", "train.flow_lr"),
         weight_decay=_non_negative_float(raw, "weight_decay", "train.weight_decay"),
-        vae_beta=_non_negative_float(raw, "vae_beta", "train.vae_beta"),
+        vae_kl_weight=_non_negative_float(
+            raw, "vae_kl_weight", "train.vae_kl_weight"
+        ),
         grad_clip=_positive_float(raw, "grad_clip", "train.grad_clip"),
         log_interval=_positive_int(raw, "log_interval", "train.log_interval"),
         max_train_steps=_optional_positive_int(
@@ -209,6 +213,12 @@ def _build_visual(raw: dict[str, Any]) -> VisualConfig:
     return VisualConfig(
         pca_samples=_positive_int(raw, "pca_samples", "visual.pca_samples"),
         grid_columns=_positive_int(raw, "grid_columns", "visual.grid_columns"),
+        feature_map_channels=_positive_int(
+            raw, "feature_map_channels", "visual.feature_map_channels"
+        ),
+        feature_map_time=_unit_interval_float(
+            raw, "feature_map_time", "visual.feature_map_time"
+        ),
     )
 
 
@@ -271,6 +281,13 @@ def _non_negative_float(raw: dict[str, Any], key: str, label: str) -> float:
     return value
 
 
+def _unit_interval_float(raw: dict[str, Any], key: str, label: str) -> float:
+    value = _number(raw, key, label)
+    if value < 0 or value > 1:
+        raise ValueError(f"{label} 必须位于 [0,1]。")
+    return value
+
+
 def _number(raw: dict[str, Any], key: str, label: str) -> float:
     value = raw.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -307,3 +324,5 @@ def _check_config_relations(cfg: AppConfig) -> None:
         raise ValueError("model.latent_size 必须等于 model.image_size // 2。")
     if cfg.sample.history_steps > cfg.sample.sampling_steps:
         raise ValueError("sample.history_steps 不得大于 sample.sampling_steps。")
+    if cfg.visual.feature_map_channels > cfg.model.flow_hidden_channels:
+        raise ValueError("visual.feature_map_channels 不得大于 model.flow_hidden_channels。")

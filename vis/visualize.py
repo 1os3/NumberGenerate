@@ -2,7 +2,7 @@
 
 模块: vis/visualize.py
 依赖: argparse, pathlib, config, data, model, train.common, vis.plots, vis.visualize_checks
-读取配置: train.seed, train.device, paths.checkpoint_dir, paths.output_dir, paths.log_dir, paths.vae_checkpoint, paths.flow_checkpoint, data.batch_size, data.num_workers, data.download, data.pin_memory
+读取配置: train.seed, train.device, paths.checkpoint_dir, paths.output_dir, paths.log_dir, paths.vae_checkpoint, paths.flow_checkpoint, data.batch_size, data.num_workers, data.download, data.pin_memory, visual.feature_map_channels, visual.feature_map_time, visual.pca_samples
 对外接口:
     - run_visualization(cfg) -> dict[str, Path]
 说明: 该入口对齐训练脚本用法，用户只需运行 python -m vis.visualize。
@@ -18,7 +18,12 @@ from config import AppConfig, load_config
 from data import get_mnist_loaders
 from model import FlowModel, VAE
 from train.common import load_checkpoint, prepare_runtime
-from vis.plots import save_flow_feature_pca, save_generation_steps, save_vae_latent_pca
+from vis.plots import (
+    save_flow_feature_maps,
+    save_flow_feature_pca,
+    save_generation_steps,
+    save_vae_latent_pca,
+)
 from vis.visualize_checks import check_visualization_checkpoints
 
 
@@ -42,6 +47,7 @@ def run_visualization(cfg: AppConfig) -> dict[str, Path]:
     _, test_loader = get_mnist_loaders(cfg)
     return {
         "generation_steps": save_generation_steps(flow, vae, cfg),
+        "flow_feature_maps": save_flow_feature_maps(flow, vae, test_loader, cfg),
         "flow_feature_pca": save_flow_feature_pca(flow, vae, test_loader, cfg),
         "vae_latent_pca": save_vae_latent_pca(vae, test_loader, cfg),
     }

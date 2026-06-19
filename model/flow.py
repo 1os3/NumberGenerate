@@ -17,7 +17,7 @@ from torch import nn
 
 from config.schema import AppConfig
 from model.flow_checks import check_flow_config, check_flow_inputs
-from model.layers import ConditionalDepthwiseSeparableBlock
+from model.layers import ConditionalDepthwiseSeparableBlock, LayerNorm2d
 
 
 class TimeEmbedding(nn.Module):
@@ -62,6 +62,7 @@ class FlowModel(nn.Module):
                 for _ in range(cfg.model.flow_depth)
             ]
         )
+        self.output_norm = LayerNorm2d(hidden)
         self.output_projection = nn.Conv2d(hidden, cfg.model.latent_channels, kernel_size=1)
 
     def forward(
@@ -70,7 +71,7 @@ class FlowModel(nn.Module):
         """预测从噪声潜变量指向数据潜变量的速度。"""
 
         features = self.extract_features(z_t, t, labels)
-        return self.output_projection(features[-1])
+        return self.output_projection(self.output_norm(features[-1]))
 
     def extract_features(
         self, z_t: torch.Tensor, t: torch.Tensor, labels: torch.Tensor

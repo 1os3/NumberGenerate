@@ -2,7 +2,7 @@
 
 模块: train/vae_trainer.py
 依赖: argparse, torch, torch.nn.functional, config, data.mnist, model.vae, train.common
-读取配置: train.vae_epochs, train.vae_lr, train.weight_decay, train.vae_beta, train.grad_clip, train.log_interval, train.max_train_steps, paths.vae_checkpoint
+读取配置: train.vae_epochs, train.vae_lr, train.weight_decay, train.vae_kl_weight, train.grad_clip, train.log_interval, train.max_train_steps, paths.vae_checkpoint
 对外接口:
     - train_vae(cfg) -> dict
     - vae_loss(recon, images, mu, logvar, cfg) -> Tensor
@@ -64,7 +64,7 @@ def vae_loss(
 
     recon_loss = F.mse_loss(recon, images)
     kl_loss = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
-    return recon_loss + cfg.train.vae_beta * kl_loss
+    return recon_loss + cfg.train.vae_kl_weight * kl_loss
 
 
 def main() -> None:

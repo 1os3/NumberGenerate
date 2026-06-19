@@ -1,10 +1,11 @@
-"""保存生成结果、Flow 特征 PCA 和 VAE 潜空间 PCA 可视化。
+"""保存生成结果、Flow 特征图、Flow 特征 PCA 和 VAE 潜空间 PCA 可视化。
 
 模块: vis/plots.py
 依赖: pathlib, torch, matplotlib, config.schema, model, train.sampling, vis.plots_checks
-读取配置: paths.output_dir, model.num_classes, sample.history_steps, sample.num_samples_per_digit, visual.pca_samples, visual.grid_columns
+读取配置: paths.output_dir, model.num_classes, sample.history_steps, sample.sampling_steps, visual.pca_samples, visual.feature_map_channels, visual.feature_map_time
 对外接口:
     - save_generation_steps(flow, vae, cfg) -> Path
+    - save_flow_feature_maps(flow, vae, loader, cfg) -> Path
     - save_flow_feature_pca(flow, vae, loader, cfg) -> Path
     - save_vae_latent_pca(vae, loader, cfg) -> Path
 说明: 绘图库在函数内按需导入，便于缺依赖时给出明确错误。
@@ -36,10 +37,32 @@ def save_generation_steps(flow: FlowModel, vae: VAE, cfg: AppConfig) -> Path:
 
 
 @torch.no_grad()
+def save_flow_feature_maps(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) -> Path:
+    """保存单个样本在 Flow 各主干块后的真实中间层特征图。"""
+
+    check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    device = next(flow.parameters()).device
+    images, labels = _first_batch(loader)
+    image = images[:1].to(device)
+    label = labels[:1].to(device, dtype=torch.long)
+    mu, _ = vae.encode(image)
+    t = torch.full((1,), cfg.visual.feature_map_time, device=device)
+    features = flow.extract_features(mu, t, label)
+    feature_maps = [
+        feature[0, : cfg.visual.feature_map_channels].detach().cpu() for feature in features
+    ]
+    path = cfg.paths.output_dir / "flow_feature_maps.png"
+    _save_feature_map_grid(feature_maps, label.item(), cfg.visual.feature_map_time, path)
+    return path
+
+
+@torch.no_grad()
 def save_flow_feature_pca(flow: FlowModel, vae: VAE, loader, cfg: AppConfig) -> Path:
     """保存 Flow 最后一层中间特征的 PCA 散点图。"""
 
     check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
     device = next(flow.parameters()).device
     images, labels = _collect_images(loader, cfg)
     images = images.to(device)
@@ -58,6 +81,7 @@ def save_vae_latent_pca(vae: VAE, loader, cfg: AppConfig) -> Path:
     """保存 VAE 潜空间均值的 PCA 散点图。"""
 
     check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
     device = next(vae.parameters()).device
     images, labels = _collect_images(loader, cfg)
     mu, _ = vae.encode(images.to(device))
@@ -80,6 +104,13 @@ def _collect_images(loader, cfg: AppConfig) -> tuple[torch.Tensor, torch.Tensor]
     images = torch.cat(images_list, dim=0)[: cfg.visual.pca_samples]
     labels = torch.cat(labels_list, dim=0)[: cfg.visual.pca_samples]
     return images, labels
+
+
+def _first_batch(loader) -> tuple[torch.Tensor, torch.Tensor]:
+    try:
+        return next(iter(loader))
+    except StopIteration as exc:
+        raise ValueError("可视化需要至少一个数据 batch。") from exc
 
 
 def _pca_2d(features: torch.Tensor) -> torch.Tensor:
@@ -109,6 +140,46 @@ def _save_step_grid(history: torch.Tensor, path: Path) -> None:
     fig.tight_layout(pad=0.1)
     fig.savefig(path, dpi=160)
     plt.close(fig)
+
+
+def _save_feature_map_grid(
+    feature_maps: list[torch.Tensor], label: int, time_value: float, path: Path
+) -> None:
+    plt = _matplotlib()
+    rows = len(feature_maps)
+    cols = feature_maps[0].shape[0]
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 1.2, rows * 1.2))
+    axes_grid = _axes_grid(axes, rows, cols)
+    for row, maps in enumerate(feature_maps):
+        for col, feature_map in enumerate(maps):
+            axis = axes_grid[row][col]
+            axis.imshow(_normalize_map(feature_map).numpy(), cmap="viridis")
+            axis.set_xticks([])
+            axis.set_yticks([])
+            if row == 0:
+                axis.set_title(f"C{col}", fontsize=7)
+            if col == 0:
+                axis.set_ylabel(f"B{row + 1}", fontsize=8)
+    fig.suptitle(f"Flow feature maps | label={label} | t={time_value:.2f}", fontsize=10)
+    fig.tight_layout(pad=0.1)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def _axes_grid(axes, rows: int, cols: int):
+    if rows == 1 and cols == 1:
+        return [[axes]]
+    if rows == 1:
+        return [axes]
+    if cols == 1:
+        return [[axis] for axis in axes]
+    return axes
+
+
+def _normalize_map(feature_map: torch.Tensor) -> torch.Tensor:
+    min_value = feature_map.min()
+    max_value = feature_map.max()
+    return (feature_map - min_value) / (max_value - min_value + 1e-6)
 
 
 def _save_scatter(points: torch.Tensor, labels: torch.Tensor, path: Path, title: str) -> None:

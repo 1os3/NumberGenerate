@@ -17,7 +17,7 @@ import torch
 from torch import nn
 
 from config.schema import AppConfig
-from model.layers import ResidualBlock
+from model.layers import LayerNorm2d, ResidualBlock
 from model.vae_checks import check_image_batch, check_latent_batch, check_vae_config
 
 
@@ -32,6 +32,7 @@ class VAEEncoder(nn.Module):
         self.stem = nn.Conv2d(cfg.model.image_channels, hidden, kernel_size=1)
         self.block = ResidualBlock(hidden)
         self.downsample = nn.Conv2d(hidden, latent, kernel_size=2, stride=2)
+        self.latent_norm = LayerNorm2d(latent)
         self.to_mu = nn.Conv2d(latent, latent, kernel_size=1)
         self.to_logvar = nn.Conv2d(latent, latent, kernel_size=1)
 
@@ -41,7 +42,7 @@ class VAEEncoder(nn.Module):
         check_image_batch(x, self.cfg)
         hidden = self.stem(x)
         hidden = self.block(hidden)
-        latent = self.downsample(hidden)
+        latent = self.latent_norm(self.downsample(hidden))
         return self.to_mu(latent), self.to_logvar(latent)
 
 

@@ -4,6 +4,7 @@ from importlib import import_module
 
 
 _EXPORTS = {
+    "save_flow_feature_maps": ("vis.plots", "save_flow_feature_maps"),
     "run_visualization": ("vis.visualize", "run_visualization"),
     "save_flow_feature_pca": ("vis.plots", "save_flow_feature_pca"),
     "save_generation_steps": ("vis.plots", "save_generation_steps"),
@@ -11,6 +12,7 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "save_flow_feature_maps",
     "run_visualization",
     "save_flow_feature_pca",
     "save_generation_steps",
