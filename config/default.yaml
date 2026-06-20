@@ -16,12 +16,12 @@ data:
 train:
   seed: 42                            # 随机种子，用于复现实验
   device: auto                        # 训练设备；auto 自动选择 cuda 或 cpu，也可显式写 cpu/cuda
-  vae_epochs: 200                      # VAE 训练轮数
+  vae_epochs: 400                      # VAE 训练轮数
   flow_epochs: 200                     # Flow Matching 模型训练轮数
   vae_lr: 0.0001                      # VAE AdamW 学习率
   flow_lr: 0.0001                     # Flow AdamW 学习率
   weight_decay: 0.000001              # AdamW 权重衰减系数
-  vae_kl_weight: 0.005             # VAE KL 散度权重(β-VAE 的 β)；损失改为逐元素求和/对 batch 取均值后的等效值
+  vae_kl_weight: 0.05             # VAE KL 散度权重(β-VAE 的 β)；损失改为逐元素求和/对 batch 取均值后的等效值
   grad_clip: 1000.0                      # 梯度裁剪阈值，防止训练早期梯度爆炸
   grad_monitor_enabled: true          # 是否在训练日志中监测小梯度比例
   grad_small_threshold: 0.00000001    # 小梯度判定阈值；abs(grad) 小于该值会计入 small ratio
