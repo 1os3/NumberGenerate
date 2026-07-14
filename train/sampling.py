@@ -5,6 +5,7 @@
 读取配置: model.latent_channels, model.latent_size, sample.sampling_steps, sample.history_steps
 对外接口:
     - sample_flow(flow, vae, labels, cfg, return_history=False) -> Tensor | tuple[Tensor, Tensor]
+    - sample_flow_step_trace(flow, labels, cfg) -> tuple[Tensor, Tensor]
 说明: 采样从高斯噪声潜变量出发，Euler 积分后用 VAE decoder 还原图像。
 """
 
@@ -40,13 +41,7 @@ def sample_flow(
     check_sample_inputs(labels, cfg)
     device = next(flow.parameters()).device
     labels = labels.to(device)
-    z = torch.randn(
-        labels.shape[0],
-        cfg.model.latent_channels,
-        cfg.model.latent_size,
-        cfg.model.latent_size,
-        device=device,
-    )
+    z = _initial_latents(labels, cfg, device)
     flow.eval()
     vae.eval()
     history = []
@@ -63,6 +58,51 @@ def sample_flow(
     if not return_history:
         return images
     return images, torch.stack(history).clamp(0, 1)
+
+
+@torch.no_grad()
+def sample_flow_step_trace(
+    flow: FlowModel,
+    labels: torch.Tensor,
+    cfg: AppConfig,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """记录采样每一步的预测速度和最后一个主干块输出。
+
+    参数:
+        flow: 已训练的 FlowModel
+        labels: 形状 [N] 的数字标签
+        cfg: 项目配置对象，读取潜空间尺寸与采样步数
+    返回:
+        预测速度历史 [S,N,C,H,W] 与末端骨干特征历史 [S,N,D,H,W]
+    """
+
+    check_sample_inputs(labels, cfg)
+    device = next(flow.parameters()).device
+    labels = labels.to(device)
+    z = _initial_latents(labels, cfg, device)
+    flow.eval()
+    velocities = []
+    final_features = []
+    step_size = 1.0 / cfg.sample.sampling_steps
+    for step in range(cfg.sample.sampling_steps):
+        t = torch.full((labels.shape[0],), step * step_size, device=device)
+        velocity, features = flow.predict_with_features(z, t, labels)
+        velocities.append(velocity.detach().cpu())
+        final_features.append(features[-1].detach().cpu())
+        z = z + step_size * velocity
+    return torch.stack(velocities), torch.stack(final_features)
+
+
+def _initial_latents(
+    labels: torch.Tensor, cfg: AppConfig, device: torch.device
+) -> torch.Tensor:
+    return torch.randn(
+        labels.shape[0],
+        cfg.model.latent_channels,
+        cfg.model.latent_size,
+        cfg.model.latent_size,
+        device=device,
+    )
 
 
 def _history_save_steps(sampling_steps: int, history_steps: int) -> set[int]:

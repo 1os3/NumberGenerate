@@ -1,10 +1,11 @@
-"""保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量诊断可视化。
+"""保存生成结果、Flow 逐步预测与特征图、VAE 重构、PCA 和潜变量诊断可视化。
 
 模块: vis/plots.py
 依赖: pathlib, torch, matplotlib, config.schema, model, train.flow_trainer, train.sampling, vis.plots_checks
-读取配置: paths.output_dir, model.num_classes, sample.history_steps, sample.sampling_steps, visual.pca_samples, visual.feature_map_channels, visual.feature_map_time
+读取配置: paths.output_dir, model.num_classes, sample.history_steps, sample.sampling_steps, visual.pca_samples, visual.grid_columns, visual.feature_map_channels, visual.feature_map_time, visual.flow_step_label
 对外接口:
     - save_generation_steps(flow, vae, cfg) -> Path
+    - save_flow_prediction_steps(flow, cfg) -> Path
     - save_flow_feature_pca_map(flow, vae, loader, cfg) -> Path
     - save_flow_feature_pca(flow, vae, loader, cfg) -> Path
     - save_vae_reconstruction(vae, loader, cfg) -> Path
@@ -25,7 +26,7 @@ import torch.nn.functional as F
 from config.schema import AppConfig
 from model import FlowModel, VAE
 from train.flow_trainer import sample_vae_posterior
-from train.sampling import sample_flow
+from train.sampling import sample_flow, sample_flow_step_trace
 from vis.plots_checks import (
     check_region_values,
     check_visual_config,
@@ -43,6 +44,31 @@ def save_generation_steps(flow: FlowModel, vae: VAE, cfg: AppConfig) -> Path:
     _, history = sample_flow(flow, vae, labels, cfg, return_history=True)
     path = cfg.paths.output_dir / "generation_steps.png"
     _save_step_grid(history, path)
+    return path
+
+
+@torch.no_grad()
+def save_flow_prediction_steps(flow: FlowModel, cfg: AppConfig) -> Path:
+    """保存每个采样步的预测流场与最后一个主干块输出特征。"""
+
+    check_visual_config(cfg)
+    cfg.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    device = next(flow.parameters()).device
+    labels = torch.tensor([cfg.visual.flow_step_label], device=device, dtype=torch.long)
+    velocities, final_features = sample_flow_step_trace(flow, labels, cfg)
+    flow_vectors = _pca_map_sequence(velocities[:, 0], 2, center_projection=False)
+    feature_components = _pca_map_sequence(
+        final_features[:, 0], cfg.visual.feature_map_channels
+    )
+    feature_rgb = _normalize_map_sequence(feature_components[:, -3:])
+    path = cfg.paths.output_dir / "flow_prediction_steps.png"
+    _save_flow_prediction_steps(
+        flow_vectors,
+        feature_rgb,
+        cfg.visual.flow_step_label,
+        cfg.visual.grid_columns,
+        path,
+    )
     return path
 
 
@@ -308,6 +334,94 @@ def _feature_map_pca_rgb(feature_map: torch.Tensor, components: int) -> torch.Te
     projected = centered @ v[:, :q]
     rgb = projected[:, -3:].T.reshape(3, height, width)
     return torch.stack([_normalize_map(channel) for channel in rgb])
+
+
+def _pca_map_sequence(
+    feature_maps: torch.Tensor,
+    components: int,
+    center_projection: bool = True,
+) -> torch.Tensor:
+    steps, channels, height, width = feature_maps.shape
+    flat = feature_maps.permute(0, 2, 3, 1).reshape(-1, channels)
+    centered = flat - flat.mean(dim=0, keepdim=True)
+    q = min(components, centered.shape[0], centered.shape[1])
+    _, _, basis = torch.pca_lowrank(centered, q=q)
+    projected_source = centered if center_projection else flat
+    projected = projected_source @ basis[:, :q]
+    if q < components:
+        projected = F.pad(projected, (0, components - q))
+    return projected.reshape(steps, height, width, components).permute(0, 3, 1, 2)
+
+
+def _normalize_map_sequence(feature_maps: torch.Tensor) -> torch.Tensor:
+    minimum = feature_maps.amin(dim=(0, 2, 3), keepdim=True)
+    maximum = feature_maps.amax(dim=(0, 2, 3), keepdim=True)
+    return (feature_maps - minimum) / (maximum - minimum + 1e-6)
+
+
+def _save_flow_prediction_steps(
+    flow_vectors: torch.Tensor,
+    feature_rgb: torch.Tensor,
+    label: int,
+    grid_columns: int,
+    path: Path,
+) -> None:
+    plt = _matplotlib()
+    steps, _, height, width = flow_vectors.shape
+    columns = min(grid_columns, steps)
+    groups = (steps + columns - 1) // columns
+    fig, axes = plt.subplots(
+        groups * 2,
+        columns,
+        figsize=(columns * 2.1, groups * 4.0),
+        squeeze=False,
+    )
+    y, x = torch.meshgrid(torch.arange(height), torch.arange(width), indexing="ij")
+    magnitudes = torch.linalg.vector_norm(flow_vectors, dim=1)
+    max_magnitude = max(float(magnitudes.max().item()), 1e-6)
+    quiver_scale = max_magnitude / 1.2
+    for index in range(steps):
+        group = index // columns
+        column = index % columns
+        flow_axis = axes[group * 2, column]
+        feature_axis = axes[group * 2 + 1, column]
+        flow_axis.imshow(
+            magnitudes[index].numpy(), cmap="magma", vmin=0, vmax=max_magnitude
+        )
+        flow_axis.quiver(
+            x.numpy(),
+            y.numpy(),
+            flow_vectors[index, 0].numpy(),
+            flow_vectors[index, 1].numpy(),
+            color="white",
+            angles="xy",
+            scale_units="xy",
+            scale=quiver_scale,
+            width=0.008,
+            headwidth=3.5,
+            headlength=4.5,
+        )
+        flow_axis.set_title(f"step {index + 1} | t={index / steps:.3f}", fontsize=8)
+        flow_axis.set_xticks([])
+        flow_axis.set_yticks([])
+        feature_axis.imshow(feature_rgb[index].permute(1, 2, 0).numpy())
+        feature_axis.set_xticks([])
+        feature_axis.set_yticks([])
+        if column == 0:
+            flow_axis.set_ylabel("Predicted flow\nPCA to 2D", fontsize=8)
+            feature_axis.set_ylabel("Final backbone\nPCA to RGB", fontsize=8)
+    for index in range(steps, groups * columns):
+        group = index // columns
+        column = index % columns
+        axes[group * 2, column].axis("off")
+        axes[group * 2 + 1, column].axis("off")
+    fig.suptitle(
+        f"Flow prediction and final backbone feature at every sampling step | label={label}",
+        fontsize=12,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.98), pad=0.35)
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _save_rgb_map(rgb_map: torch.Tensor, path: Path, title: str) -> None:

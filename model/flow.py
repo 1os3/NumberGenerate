@@ -6,6 +6,7 @@
 对外接口:
     - FlowModel(cfg) -> nn.Module
     - FlowModel.forward(z_t, t, labels) -> Tensor
+    - FlowModel.predict_with_features(z_t, t, labels) -> tuple[Tensor, list[Tensor]]
     - FlowModel.extract_features(z_t, t, labels) -> list[Tensor]
 说明: 只有 8 层条件 ConvNeXt 主干块使用 AdaLN2d，输入和输出投影保持普通卷积。
 """
@@ -70,8 +71,17 @@ class FlowModel(nn.Module):
     ) -> torch.Tensor:
         """预测从噪声潜变量指向数据潜变量的速度。"""
 
+        velocity, _ = self.predict_with_features(z_t, t, labels)
+        return velocity
+
+    def predict_with_features(
+        self, z_t: torch.Tensor, t: torch.Tensor, labels: torch.Tensor
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """一次前向同时返回预测速度和各主干块输出特征。"""
+
         features = self.extract_features(z_t, t, labels)
-        return self.output_projection(self.output_norm(features[-1]))
+        velocity = self.output_projection(self.output_norm(features[-1]))
+        return velocity, features
 
     def extract_features(
         self, z_t: torch.Tensor, t: torch.Tensor, labels: torch.Tensor

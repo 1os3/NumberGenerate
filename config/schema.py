@@ -93,6 +93,7 @@ class VisualConfig:
     grid_columns: int
     feature_map_channels: int
     feature_map_time: float
+    flow_step_label: int
 
 
 @dataclass(frozen=True)
@@ -235,6 +236,7 @@ def _build_visual(raw: dict[str, Any]) -> VisualConfig:
         feature_map_time=_unit_interval_float(
             raw, "feature_map_time", "visual.feature_map_time"
         ),
+        flow_step_label=_integer(raw, "flow_step_label", "visual.flow_step_label"),
     )
 
 
@@ -346,3 +348,5 @@ def _check_config_relations(cfg: AppConfig) -> None:
         raise ValueError("visual.feature_map_channels 不得大于 model.flow_hidden_channels。")
     if cfg.visual.feature_map_channels < 3:
         raise ValueError("visual.feature_map_channels 必须 >= 3，才能组成 RGB PCA 特征图。")
+    if not 0 <= cfg.visual.flow_step_label < cfg.model.num_classes:
+        raise ValueError("visual.flow_step_label 必须位于 [0, model.num_classes) 范围内。")

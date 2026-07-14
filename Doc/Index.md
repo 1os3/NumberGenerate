@@ -35,7 +35,7 @@
 
 ## vis/ — 可视化与日志渲染
 
-- [vis/plots.py](../vis/plots.py) — 保存生成结果、Flow 特征 PCA 图、VAE 重构、VAE PCA 和潜变量空间诊断可视化
+- [vis/plots.py](../vis/plots.py) — 保存生成结果、Flow 逐步预测与特征图、VAE 重构、PCA 和潜变量诊断可视化
 - [vis/visualize.py](../vis/visualize.py) — 一键加载训练权重并按模式生成完整或仅 VAE 可视化图
 
 ## tests/ — 自动化验证

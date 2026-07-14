@@ -264,6 +264,8 @@ image = VAE.decode(z)
 
 `sample_flow(..., return_history=True)` 会按 `sample.history_steps` 均匀保存中间图像，方便观察数字从噪声逐步成形。默认配置让 `history_steps` 与 `sampling_steps` 一致；如果只想抽帧展示，可以把 `history_steps` 设得更小。
 
+`sample_flow_step_trace(...)` 则始终记录全部 `sample.sampling_steps` 的预测速度和最后一个 Flow 主干块输出，供逐步诊断可视化使用，不受 `sample.history_steps` 抽帧设置影响。
+
 ## 可视化解释
 
 可视化函数位于 `vis/plots.py`。
@@ -271,6 +273,7 @@ image = VAE.decode(z)
 | 输出文件 | 函数 | 解释 |
 | --- | --- | --- |
 | `outputs/generation_steps.png` | `save_generation_steps` | 展示每个数字在 `sample.history_steps` 个历史帧中的生成轨迹 |
+| `outputs/flow_prediction_steps.png` | `save_flow_prediction_steps` | 展示指定数字在每个采样步的预测流场和末端骨干特征；流场以共享 PCA 投影为二维箭头，特征以共享 PCA 投影为 RGB |
 | `outputs/flow_feature_pca_map.png` | `save_flow_feature_pca_map` | 把单个 posterior 样本的 Flow 末端特征图用 PCA 压到 3 通道 RGB |
 | `outputs/flow_feature_pca.png` | `save_flow_feature_pca` | 把 posterior 样本对应的 Flow 最后一层中间特征压到 2D，观察不同数字是否分离 |
 | `outputs/vae_reconstruction.png` | `save_vae_reconstruction` | 选一张 MNIST，展示原图、VAE 压缩表示、重构图和误差图 |
@@ -280,6 +283,8 @@ image = VAE.decode(z)
 | `outputs/vae_latent_energy_map.png` | `save_vae_latent_energy_map` | 把 `mean(abs(mu))` 画成空间热力图，观察潜变量能量是否跟前景结构对齐 |
 
 PCA 使用 `torch.pca_lowrank`。散点颜色对应 MNIST 标签。
+
+逐步预测可视化跟踪 `visual.flow_step_label` 指定的数字。所有采样步共用 PCA 基底、流场幅值范围和 RGB 色阶，因此相邻步骤之间的箭头、亮度与颜色可以直接比较。每个时间步上方是潜空间预测速度投影后的二维流场，下方是该次预测最后一个主干块的输出特征。
 
 Flow 特征图可视化会从测试集取一个样本，在 `visual.feature_map_time` 指定的时间点提取 Flow 末端特征，用 PCA 压成 3 通道图像。这样比直接画任意几个卷积通道更容易观察整体结构。
 
@@ -334,6 +339,7 @@ logs/                日志目录，运行后生成，默认被 git 忽略
 | `sample.history_steps` | `32` | 生成过程可视化保存的历史帧数，通常与 `sample.sampling_steps` 一致 |
 | `visual.feature_map_channels` | `3` | Flow 末端特征图 PCA 保留通道数，最终取 3 通道组成 RGB 图 |
 | `visual.feature_map_time` | `0.5` | 特征图可视化采用的生成时间点 |
+| `visual.flow_step_label` | `0` | 逐步流场与末端骨干特征可视化跟踪的数字标签 |
 
 调试配置示例 `config/debug.yaml`：
 
@@ -447,6 +453,7 @@ ckpt/flow.pt
 
 ```text
 outputs/generation_steps.png
+outputs/flow_prediction_steps.png
 outputs/flow_feature_pca_map.png
 outputs/flow_feature_pca.png
 outputs/vae_reconstruction.png
@@ -513,6 +520,7 @@ images = sample_flow(flow, vae, labels, cfg)
 - 默认配置可加载。
 - VAE encode/decode/forward 形状正确。
 - Flow 主干块全部是条件块，输出速度形状正确。
+- Flow 逐步轨迹完整记录每个采样步的预测速度和末端骨干特征。
 - VAE loss 和 Flow Matching loss 可反向传播。
 - `sample_flow` 输出 `N x 2 x 28 x 28` 的 background/foreground 概率图。
 

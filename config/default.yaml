@@ -52,3 +52,4 @@ visual:
   grid_columns: 10                    # 图像网格默认列数，适合按 0 到 9 排列
   feature_map_channels: 3             # Flow 末端特征图 PCA 保留通道数；最终取 3 通道组成 RGB 图
   feature_map_time: 0.5               # 中间层特征图可视化使用的 Flow 时间点，范围 [0,1]
+  flow_step_label: 0                  # 逐步流场与末端骨干特征可视化所跟踪的数字标签

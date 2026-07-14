@@ -2,7 +2,7 @@
 
 模块: vis/visualize.py
 依赖: argparse, pathlib, config, data, model, train.common, vis.plots, vis.visualize_checks
-读取配置: train.seed, train.device, paths.checkpoint_dir, paths.output_dir, paths.log_dir, paths.vae_checkpoint, paths.flow_checkpoint, data.batch_size, data.num_workers, data.download, data.pin_memory, visual.feature_map_channels, visual.feature_map_time, visual.pca_samples
+读取配置: train.seed, train.device, paths.checkpoint_dir, paths.output_dir, paths.log_dir, paths.vae_checkpoint, paths.flow_checkpoint, data.batch_size, data.num_workers, data.download, data.pin_memory, sample.sampling_steps, visual.grid_columns, visual.feature_map_channels, visual.feature_map_time, visual.flow_step_label, visual.pca_samples
 对外接口:
     - run_visualization(cfg, mode="all") -> dict[str, Path]
 说明: 该入口对齐训练脚本用法，用户只需运行 python -m vis.visualize。
@@ -23,6 +23,7 @@ from train.common import load_checkpoint, prepare_runtime
 from vis.plots import (
     save_flow_feature_pca_map,
     save_flow_feature_pca,
+    save_flow_prediction_steps,
     save_generation_steps,
     save_vae_kl_map,
     save_vae_latent_energy_map,
@@ -64,6 +65,7 @@ def run_visualization(cfg: AppConfig, mode: str = "all") -> dict[str, Path]:
     flow.eval()
     outputs = {
         "generation_steps": save_generation_steps(flow, vae, cfg),
+        "flow_prediction_steps": save_flow_prediction_steps(flow, cfg),
         "flow_feature_pca_map": save_flow_feature_pca_map(flow, vae, test_loader, cfg),
         "flow_feature_pca": save_flow_feature_pca(flow, vae, test_loader, cfg),
     }

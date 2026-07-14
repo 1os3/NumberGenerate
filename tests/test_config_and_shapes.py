@@ -23,6 +23,7 @@ from model import ConditionalDepthwiseSeparableBlock, FlowModel, LayerNorm2d, VA
 from train import (
     flow_matching_loss,
     sample_flow,
+    sample_flow_step_trace,
     sample_flow_time,
     sample_vae_posterior,
     vae_loss,
@@ -81,8 +82,12 @@ class ConfigAndShapeTests(unittest.TestCase):
         t = torch.rand(2)
         labels = torch.tensor([0, 1], dtype=torch.long)
         pred = flow(z_t, t, labels)
+        traced_pred, features = flow.predict_with_features(z_t, t, labels)
         target = torch.randn_like(pred)
         self.assertEqual(tuple(pred.shape), tuple(z_t.shape))
+        self.assertTrue(torch.allclose(pred, traced_pred))
+        self.assertEqual(len(features), self.cfg.model.flow_depth)
+        self.assertEqual(tuple(features[-1].shape), (2, 256, 14, 14))
         loss = flow_matching_loss(pred, target)
         loss.backward()
         self.assertEqual(loss.ndim, 0)
@@ -109,6 +114,15 @@ class ConfigAndShapeTests(unittest.TestCase):
         images, history = sample_flow(flow, vae, labels, cfg, return_history=True)
         self.assertEqual(tuple(images.shape), (2, 2, 28, 28))
         self.assertEqual(tuple(history.shape), (3, 2, 2, 28, 28))
+
+    def test_sample_flow_step_trace_records_every_step(self) -> None:
+        """逐步轨迹应记录每次预测速度和最后一个主干块输出。"""
+
+        flow = FlowModel(self.cfg)
+        labels = torch.tensor([0, 1], dtype=torch.long)
+        velocities, features = sample_flow_step_trace(flow, labels, self.cfg)
+        self.assertEqual(tuple(velocities.shape), (2, 2, 32, 14, 14))
+        self.assertEqual(tuple(features.shape), (2, 2, 256, 14, 14))
 
     def test_mnist_transform_creates_presence_channels(self) -> None:
         """MNIST transform 应输出 background/foreground 二通道 one-hot 表示。"""
@@ -265,6 +279,7 @@ def _build_test_config():
             "grid_columns": 2,
             "feature_map_channels": 3,
             "feature_map_time": 0.5,
+            "flow_step_label": 0,
         },
     }
     return build_config(raw, Path.cwd())
